@@ -421,6 +421,7 @@ function App() {
           } catch (error) {
             ultimoErro = error
             limparAck()
+            if (abortRef.current) throw new Error('Envio interrompido')
             if (tentativa < 2) {
               setRetorno(`ACK não recebido. Tentativa ${tentativa + 2}/3...`)
               await sleep(300)
@@ -430,6 +431,7 @@ function App() {
 
         if (!sucesso) throw ultimoErro || new Error('Falha no envio')
 
+        if (abortRef.current) throw new Error('Envio interrompido')
         setProgresso(Math.round(((packetIndex + 1) / total) * 100))
         await sleep(200)
       }
@@ -454,7 +456,9 @@ function App() {
 
   function pararEnvio() {
     abortRef.current = true
+    const ackPendente = ackResolverRef.current
     limparAck()
+    ackPendente?.reject(new Error('Envio interrompido'))
     setEnviando(false)
     setRetorno('Envio interrompido.')
   }
@@ -536,153 +540,86 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="brand">
-          <div className="brand-mark">L</div>
-          <div>
-            <div className="brand-name">LUCENAART</div>
-            <div className="brand-tagline">A SUA PRODUÇÃO NÃO PODE PARAR.</div>
-          </div>
-        </div>
-        <div className="product-title">
-          <strong>CT120</strong>
-          <span>Manager</span>
-        </div>
+        <img className="brand-logo" src="/logo-lucenaart.jpg" alt="Lucenaart do Brasil"
+          onError={e => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling.hidden = false }} />
+        <div className="brand-fallback" hidden>LUCENAART <small>DO BRASIL</small></div>
+        <div className="product-title">CT120 MANAGER</div>
+        <div className="brand-tagline">A SUA PRODUÇÃO NÃO PODE PARAR</div>
       </header>
-
       <main className="workspace">
-        <section className="hero-card">
-          <div className="device-visual" aria-hidden="true">
-            <div className="device-screen">CT120</div>
-            <div className="device-slot"></div>
+        <section className="connection-section">
+          <h2>CONEXÃO</h2>
+          <div className={`connection-status ${conectado ? 'online' : ''}`} role="status">
+            <span aria-hidden="true">●</span> {status}
           </div>
-
-          <div className="connection-area">
-            <div className="connection-title">
-              <span className={`status-dot ${conectado ? 'online' : ''}`}></span>
-              {conectado ? 'CT120 CONECTADO' : 'CT120 DESCONECTADO'}
-            </div>
-            <div className="connection-detail">{status}</div>
-            <div className="action-row">
-              <button className="btn btn-primary btn-connect" onClick={conectarCT120}>
-                {conectado ? 'RECONECTAR CT120' : 'PROCURAR DISPOSITIVO'}
-              </button>
-              <button className="btn btn-danger" onClick={desconectarCT120}>
-                DESCONECTAR
-              </button>
-            </div>
+          <div className="connection-buttons">
+            <button className="btn" onClick={conectarCT120} disabled={enviando}>PROCURAR DISPOSITIVO</button>
+            <button className="btn" onClick={desconectarCT120} disabled={enviando}>DESCONECTAR</button>
           </div>
         </section>
-
-        <section className="control-card">
-          <div className="mode-caption"><strong>TRABALHOS SALVOS</strong></div>
-
-          <div className="input-panel">
-            <label>Nome do trabalho</label>
-            <input
-              value={nomeTrabalho}
-              onChange={e => setNomeTrabalho(e.target.value)}
-              placeholder="Digite o nome do trabalho"
-            />
-          </div>
-
-          <div className="input-panel">
-            <label>Trabalhos</label>
-            <select
-              value={trabalhoSelecionado}
-              onChange={e => setTrabalhoSelecionado(e.target.value)}
-            >
-              <option value="">Nenhum trabalho selecionado</option>
-              {trabalhos.map(t => <option key={t.nome} value={t.nome}>{t.nome}</option>)}
-            </select>
-          </div>
-
-          <div className="action-row">
-            <button className="btn btn-clear" onClick={novoTrabalho}>NOVO</button>
-            <button className="btn btn-primary" onClick={salvarTrabalho}>SALVAR</button>
-            <button className="btn btn-success" onClick={abrirTrabalho}>ABRIR</button>
-            <button className="btn btn-danger" onClick={excluirTrabalho}>EXCLUIR</button>
-            <button className="btn btn-clear" onClick={() => importarRef.current?.click()}>IMPORTAR</button>
-            <button className="btn btn-primary" onClick={compartilharTrabalho}>COMPARTILHAR</button>
-            <input
-              ref={importarRef}
-              type="file"
-              accept=".json,.ct120.json,application/json,text/json,text/plain"
-              onChange={importarTrabalho}
-              style={{ display: 'none' }}
-            />
-          </div>
-        </section>
-
-        <section className="control-card">
-          <div className="mode-tabs">
-            <button className={modo === 'text' ? 'active' : ''} onClick={() => setModo('text')}>
-              TEXTO
-            </button>
-            <button className={modo === 'variable' ? 'active' : ''} onClick={() => setModo('variable')}>
-              VARIÁVEL
-            </button>
-            <button className={modo === 'image' ? 'active' : ''} onClick={() => setModo('image')}>
-              IMAGEM
-            </button>
-          </div>
-
-          <div className="mode-caption">
-            Modo selecionado: <strong>{modo === 'text' ? 'TEXTO' : modo === 'variable' ? 'VARIÁVEL' : 'IMAGEM'}</strong>
-          </div>
-
+        <section className="content-section">
+          <h2>ENVIO AO CT120</h2>
+          <label htmlFor="tipo-envio">Tipo de envio</label>
+          <select id="tipo-envio" value={modo} onChange={e => setModo(e.target.value)} disabled={enviando}>
+            <option value="text">Texto</option>
+            <option value="variable">Variável</option>
+            <option value="image">Imagem</option>
+          </select>
           {modo !== 'image' && (
             <div className="input-panel">
-              <label>{modo === 'text' ? 'Texto para impressão' : 'Conteúdo da variável'}</label>
-              <textarea
-                value={texto}
-                onChange={e => setTexto(e.target.value)}
-                rows={5}
-                placeholder="Digite o conteúdo..."
-              />
-              <div className="bytes">{new Blob([texto]).size} bytes</div>
+              <label htmlFor="conteudo">Conteúdo</label>
+              <textarea id="conteudo" value={texto} onChange={e => setTexto(e.target.value)}
+                disabled={enviando} rows={5} placeholder="Digite o conteúdo para o CT120" />
             </div>
           )}
-
           {modo === 'variable' && (
-            <button className="btn btn-success btn-full" onClick={() => setEditorAberto(true)}>
-              EDITOR DE VARIÁVEIS
-            </button>
+            <button className="btn btn-full" disabled={enviando} onClick={() => setEditorAberto(true)}>EDITOR DE VARIÁVEIS</button>
           )}
-
           {modo === 'image' && (
             <div className="image-panel">
               <label className="file-picker">
-                <span>SELECIONAR IMAGEM</span>
-                <input type="file" accept="image/*" onChange={selecionarImagem} />
+                <span>SELECIONAR IMAGEM BMP</span>
+                <input type="file" accept=".bmp,image/bmp,image/x-ms-bmp" disabled={enviando} onChange={selecionarImagem} />
               </label>
               {preview && <img className="image-preview" src={preview} alt="Prévia da imagem" />}
               {imagemNome && <div className="image-name">{imagemNome}</div>}
             </div>
           )}
-
-          <div className="action-row">
-            <button className="btn btn-primary btn-send" disabled={enviando} onClick={enviar}>
-              {enviando ? 'ENVIANDO...' : `ENVIAR ${modo === 'text' ? 'TEXTO' : modo === 'variable' ? 'VARIÁVEL' : 'IMAGEM'} AO CT120`}
-            </button>
-            <button className="btn btn-clear" disabled={enviando} onClick={limparConteudo}>LIMPAR</button>
-            {enviando && <button className="btn btn-danger" onClick={pararEnvio}>PARAR</button>}
-          </div>
-
-          <div className="progress-track">
-            <div className="progress-fill" style={{ width: `${progresso}%` }} />
-          </div>
-
-          <div className={`result-box ${retorno.startsWith('ERRO') ? 'error' : retorno.startsWith('✓') ? 'success' : ''}`}>
-            {retorno || 'Pronto para enviar.'}
-          </div>
+          <button className="btn btn-full clear-button" disabled={enviando} onClick={limparConteudo}>LIMPAR TUDO</button>
         </section>
-
-        <section className="support-card">
-          <div>
-            <strong>Lucenaart do Brasil</strong>
-            <span>Suporte CT120 • Bluetooth BLE</span>
+        <section className="jobs-section">
+          <h2>TRABALHOS SALVOS</h2>
+          <input aria-label="Nome do trabalho" type="text" value={nomeTrabalho}
+            onChange={e => setNomeTrabalho(e.target.value)} placeholder="Nome do trabalho" disabled={enviando} />
+          <select aria-label="Trabalhos salvos" value={trabalhoSelecionado}
+            onChange={e => setTrabalhoSelecionado(e.target.value)} disabled={enviando}>
+            <option value="">Selecione um trabalho</option>
+            {trabalhos.map(t => <option key={t.nome} value={t.nome}>{t.nome}</option>)}
+          </select>
+          <div className="job-buttons">
+            <button className="btn" disabled={enviando} onClick={novoTrabalho}>NOVO</button>
+            <button className="btn" disabled={enviando} onClick={salvarTrabalho}>SALVAR</button>
+            <button className="btn" disabled={enviando} onClick={abrirTrabalho}>ABRIR</button>
+            <button className="btn" disabled={enviando} onClick={excluirTrabalho}>EXCLUIR</button>
+            <button className="btn" disabled={enviando} onClick={() => importarRef.current?.click()}>IMPORTAR</button>
+            <button className="btn share-button" disabled={enviando} onClick={compartilharTrabalho}>COMPARTILHAR</button>
           </div>
-          <div className="cotajet">COTAJET</div>
+          <input ref={importarRef} type="file" accept=".json,.ct120.json,application/json,text/json,text/plain"
+            onChange={importarTrabalho} style={{ display: 'none' }} />
+        </section>
+        <section className="send-section">
+          <div className="send-buttons">
+            <button className="btn" disabled={enviando} onClick={enviar}>{enviando ? 'ENVIANDO...' : 'ENVIAR'}</button>
+            <button className="btn" disabled={!enviando} onClick={pararEnvio} title="Interromper o envio ao CT120">PARAR</button>
+          </div>
+          <label className="progress-label" htmlFor="progresso">PROGRESSO DO ENVIO</label>
+          <progress id="progresso" max="100" value={progresso} aria-label="Progresso do envio" />
+        </section>
+        <section className="log-section">
+          <h2>LOG</h2>
+          <div className="result-box" role="status" aria-live="polite">
+            {retorno || `Pronto.\nTrabalhos encontrados: ${trabalhos.length}`}
+          </div>
         </section>
       </main>
 
