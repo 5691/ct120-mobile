@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { BleClient } from '@capacitor-community/bluetooth-le'
+import { CapacitorBarcodeScanner, CapacitorBarcodeScannerTypeHint } from '@capacitor/barcode-scanner'
 import './App.css'
 
 const SERVICE_UUID = '0000fff0-0000-1000-8000-00805f9b34fb'
@@ -28,6 +29,11 @@ function App() {
   const [trabalhos, setTrabalhos] = useState([])
   const [trabalhoSelecionado, setTrabalhoSelecionado] = useState('')
   const importarRef = useRef(null)
+  const bmpCatalogoRef = useRef(null)
+  const [codigoBmp, setCodigoBmp] = useState('')
+  const [resultadoCodigoBmp, setResultadoCodigoBmp] = useState('Exemplo de teste: 040.346.593.592-02 → AFT 484.bmp')
+  const [codigoDaPrevia, setCodigoDaPrevia] = useState('')
+  const [lendoCodigo, setLendoCodigo] = useState(false)
 
 
   // =========================================================
@@ -518,6 +524,11 @@ function App() {
 
   async function enviar() {
     try {
+      if (modo === 'image' && codigoDaPrevia && codigoDaPrevia !== codigoBmp.trim()) {
+        limparBmpDaPrevia()
+        setResultadoCodigoBmp('Código alterado. Toque em LOCALIZAR BMP.')
+        throw new Error('Localize o BMP do código atual antes de enviar.')
+      }
       const data = prepararDados()
       setRetorno('Enviando ao CT120...')
       await enviarPacotes(modo, data, modo === 'image' ? imagemNome : '')
@@ -648,6 +659,178 @@ function App() {
     reader.readAsDataURL(file)
   }
 
+  // =========================================================
+  // CÓDIGO DE BARRAS → BMP — mesma lógica do Android/ZF
+  // =========================================================
+  const CODIGO_TESTE = '040.346.593.592-02'
+  const CATALOGO_BMP_KEY = 'catalogo_codigo_bmp_v1'
+  const LIMITE_BMP_BYTES = 10 * 1024 * 1024
+
+  function carregarCatalogoBmp() {
+    try {
+      const catalogo = JSON.parse(localStorage.getItem(CATALOGO_BMP_KEY) || '{}')
+      return catalogo && typeof catalogo === 'object' && !Array.isArray(catalogo) ? catalogo : {}
+    } catch {
+      return {}
+    }
+  }
+
+  function salvarCatalogoBmp(catalogo) {
+    localStorage.setItem(CATALOGO_BMP_KEY, JSON.stringify(catalogo))
+  }
+
+  function base64ParaBytes(base64) {
+    const binario = atob(base64)
+    const bytes = new Uint8Array(binario.length)
+    for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i)
+    return bytes
+  }
+
+  function validarBmpBase64(base64) {
+    const bytes = base64ParaBytes(base64)
+    if (bytes.length < 54 || bytes[0] !== 0x42 || bytes[1] !== 0x4d) {
+      throw new Error('Selecione um arquivo BMP válido.')
+    }
+    if (bytes.length > LIMITE_BMP_BYTES) throw new Error('BMP maior que 10 MB.')
+    return bytes
+  }
+
+  function mostrarBmpCatalogo(nome, base64, codigo = '') {
+    validarBmpBase64(base64)
+    setModo('image')
+    setImagemNome(nome)
+    setImagemBase64(base64)
+    setPreview(`data:image/bmp;base64,${base64}`)
+    setCodigoDaPrevia(codigo)
+    setProgresso(0)
+  }
+
+  function limparBmpDaPrevia() {
+    setCodigoDaPrevia('')
+    setImagemNome('')
+    setImagemBase64('')
+    setPreview('')
+    setProgresso(0)
+  }
+
+  function alterarCodigoBmp(valor) {
+    const novo = valor
+    if (codigoDaPrevia && codigoDaPrevia !== novo.trim() && !enviando) {
+      limparBmpDaPrevia()
+      setResultadoCodigoBmp('Código alterado. Toque em LOCALIZAR BMP.')
+    }
+    setCodigoBmp(novo)
+  }
+
+  function buscarCodigoBmp(codigoForcado = '') {
+    if (enviando) {
+      setRetorno('Pare o envio antes de trocar a imagem.')
+      return
+    }
+    const chave = (codigoForcado || codigoBmp).trim()
+    if (!chave) {
+      setRetorno('Leia ou digite o código primeiro.')
+      return
+    }
+
+    limparBmpDaPrevia()
+    try {
+      const catalogo = carregarCatalogoBmp()
+      const registro = catalogo[chave]
+
+      if (!registro) {
+        setResultadoCodigoBmp(`Nenhum BMP cadastrado para ${chave}.`)
+        setRetorno('Selecione o BMP correto e toque em VINCULAR BMP.')
+        return
+      }
+
+      validarBmpBase64(registro.base64)
+      mostrarBmpCatalogo(registro.nome, registro.base64, chave)
+      setResultadoCodigoBmp(`${chave} → ${registro.nome}`)
+      setRetorno(`✓ ${chave} → ${registro.nome}`)
+    } catch (error) {
+      limparBmpDaPrevia()
+      setResultadoCodigoBmp(`Não foi possível carregar o BMP de ${chave}.`)
+      setRetorno(`ERRO: ${error?.message || String(error)}`)
+    }
+  }
+
+  async function lerCodigoBmp() {
+    if (enviando || lendoCodigo) return
+    setLendoCodigo(true)
+    try {
+      const leitura = await CapacitorBarcodeScanner.scanBarcode({
+        hint: CapacitorBarcodeScannerTypeHint.ALL,
+        scanInstructions: 'Aponte a câmera para o código de barras'
+      })
+      const chave = String(leitura?.ScanResult || '').trim()
+      if (!chave) return
+      setCodigoBmp(chave)
+      buscarCodigoBmp(chave)
+    } catch (error) {
+      const mensagem = error?.message || String(error)
+      if (!/cancel/i.test(mensagem)) setRetorno(`ERRO NO LEITOR: ${mensagem}`)
+    } finally {
+      setLendoCodigo(false)
+    }
+  }
+
+  function vincularCodigoBmp() {
+    if (enviando) {
+      setRetorno('Pare o envio antes de trocar a imagem.')
+      return
+    }
+    const chave = codigoBmp.trim()
+    if (!chave) {
+      setRetorno('Leia ou digite o código primeiro.')
+      return
+    }
+    if (!imagemBase64) {
+      setRetorno('Selecione uma imagem BMP primeiro.')
+      return
+    }
+
+    try {
+      validarBmpBase64(imagemBase64)
+      const catalogo = carregarCatalogoBmp()
+      const substituindo = Boolean(catalogo[chave]) || chave === CODIGO_TESTE
+      const mensagem = `${chave} → ${imagemNome || 'imagem.bmp'}\n\nConfira o código e a imagem antes de salvar.`
+      if (!window.confirm(`${substituindo ? 'Substituir vínculo?' : 'Vincular BMP'}\n\n${mensagem}`)) return
+
+      catalogo[chave] = { nome: imagemNome || 'imagem.bmp', base64: imagemBase64 }
+      salvarCatalogoBmp(catalogo)
+      setCodigoDaPrevia(chave)
+      setResultadoCodigoBmp(`Vínculo salvo: ${chave} → ${imagemNome || 'imagem.bmp'}`)
+      setRetorno('✓ Vínculo salvo no iPhone.')
+    } catch (error) {
+      setRetorno(`ERRO: ${error?.message || String(error)}`)
+    }
+  }
+
+  function selecionarBmpCatalogo(event) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const dataUrl = String(reader.result)
+        const comma = dataUrl.indexOf(',')
+        const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl
+        validarBmpBase64(b64)
+        mostrarBmpCatalogo(file.name, b64)
+        setResultadoCodigoBmp(`BMP selecionado: ${file.name}. Digite o código e toque em VINCULAR BMP.`)
+        setRetorno(`Imagem selecionada: ${file.name}`)
+      } catch (error) {
+        limparBmpDaPrevia()
+        setResultadoCodigoBmp('Imagem não carregada.')
+        setRetorno(`ERRO: ${error?.message || String(error)}`)
+      } finally {
+        event.target.value = ''
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+
   const dialogoVariavel = listaVariaveis()
 
   const conectado = status.startsWith('CT120 CONECTADO')
@@ -715,6 +898,28 @@ function App() {
           )}
           {modo === 'image' && (
             <div className="image-panel">
+              <div style={{ marginBottom: '14px', padding: '12px', border: '1px solid #ccc', borderRadius: '8px' }}>
+                <strong>CÓDIGO DE BARRAS / ZF</strong>
+                <input
+                  type="text"
+                  value={codigoBmp}
+                  onChange={e => alterarCodigoBmp(e.target.value)}
+                  disabled={enviando}
+                  placeholder="Leia ou digite o código"
+                  style={{ width: '100%', marginTop: '10px', boxSizing: 'border-box' }}
+                />
+                <div className="job-buttons" style={{ marginTop: '10px' }}>
+                  <button className="btn" disabled={enviando || lendoCodigo} onClick={lerCodigoBmp}>
+                    {lendoCodigo ? 'LENDO...' : 'LER CÓDIGO'}
+                  </button>
+                  <button className="btn" disabled={enviando} onClick={() => buscarCodigoBmp()}>LOCALIZAR BMP</button>
+                  <button className="btn" disabled={enviando} onClick={() => bmpCatalogoRef.current?.click()}>SELECIONAR BMP</button>
+                  <button className="btn" disabled={enviando} onClick={vincularCodigoBmp}>VINCULAR BMP</button>
+                </div>
+                <input ref={bmpCatalogoRef} type="file" accept=".bmp,image/bmp,image/x-ms-bmp"
+                  onChange={selecionarBmpCatalogo} style={{ display: 'none' }} />
+                <div style={{ marginTop: '10px', whiteSpace: 'pre-wrap' }}>{resultadoCodigoBmp}</div>
+              </div>
               <label className="file-picker">
                 <span>SELECIONAR IMAGEM BMP</span>
                 <input type="file" accept=".bmp,image/bmp,image/x-ms-bmp" disabled={enviando} onChange={selecionarImagem} />

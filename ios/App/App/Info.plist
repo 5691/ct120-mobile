@@ -41,6 +41,9 @@
   <key>NSBluetoothPeripheralUsageDescription</key>
   <string>O Lucenaart CT120 Manager usa Bluetooth para se comunicar com o datador CT120.</string>
 
+  <key>NSCameraUsageDescription</key>
+  <string>O Lucenaart CT120 Manager usa a câmera para ler códigos de barras e selecionar trabalhos de impressão.</string>
+
   <key>UIApplicationSceneManifest</key>
   <dict>
     <key>UIApplicationSupportsMultipleScenes</key>
