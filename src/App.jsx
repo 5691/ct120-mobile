@@ -6,6 +6,10 @@ const SERVICE_UUID = '0000fff0-0000-1000-8000-00805f9b34fb'
 const NOTIFY_UUID  = '0000fff1-0000-1000-8000-00805f9b34fb'
 const WRITE_UUID   = '0000fff2-0000-1000-8000-00805f9b34fb'
 
+const RELE_NAME = 'LUCENAART-RELE'
+const RELE_SERVICE_UUID = '0000fff0-0000-1000-8000-00805f9b34fb'
+const RELE_WRITE_UUID = '0000fff2-0000-1000-8000-00805f9b34fb'
+
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
 function App() {
@@ -239,6 +243,11 @@ function App() {
   const expectedAckRef = useRef(-1)
   const abortRef = useRef(false)
 
+  // Relé de impressão — conexão independente do CT120.
+  const releDeviceRef = useRef(null)
+  const [releConectado, setReleConectado] = useState(false)
+  const [releOcupado, setReleOcupado] = useState(false)
+
   function arrayBufferToBase64(buffer) {
     let binary = ''
     const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
@@ -377,6 +386,64 @@ function App() {
       notifyRef.current = null
       limparAck()
       setStatus(`Erro: ${error?.message || String(error)}`)
+    }
+  }
+
+  async function conectarRele() {
+    await BleClient.initialize()
+
+    setRetorno(`Procurando ${RELE_NAME}...`)
+
+    const device = await BleClient.requestDevice({
+      services: [RELE_SERVICE_UUID],
+      name: RELE_NAME
+    })
+
+    setRetorno(`${device.name || RELE_NAME} encontrado. Conectando...`)
+
+    await BleClient.connect(device.deviceId, () => {
+      releDeviceRef.current = null
+      setReleConectado(false)
+      setRetorno('Relé Bluetooth desconectado.')
+    })
+
+    releDeviceRef.current = device
+    setReleConectado(true)
+    setRetorno(`✓ ${device.name || RELE_NAME} conectado — FFF0 / FFF2 pronto.`)
+
+    return device
+  }
+
+  async function imprimirPeloRele() {
+    if (releOcupado) return
+
+    setReleOcupado(true)
+
+    try {
+      let device = releDeviceRef.current
+
+      if (!device?.deviceId) {
+        device = await conectarRele()
+      }
+
+      // Comando confirmado no módulo real: "IMPRIMIR " com espaço final.
+      const bytes = new TextEncoder().encode('IMPRIMIR ')
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+
+      await BleClient.write(
+        device.deviceId,
+        RELE_SERVICE_UUID,
+        RELE_WRITE_UUID,
+        view
+      )
+
+      setRetorno('✓ ▶ IMPRIMIR enviado ao relé.')
+    } catch (error) {
+      releDeviceRef.current = null
+      setReleConectado(false)
+      setRetorno(`ERRO NO RELÉ: ${error?.message || String(error)}`)
+    } finally {
+      setReleOcupado(false)
     }
   }
 
@@ -612,6 +679,20 @@ function App() {
           <div className="connection-buttons">
             <button className="btn" onClick={conectarCT120} disabled={enviando}>PROCURAR DISPOSITIVO</button>
             <button className="btn" onClick={desconectarCT120} disabled={enviando}>DESCONECTAR</button>
+          </div>
+        </section>
+        <section className="print-section">
+          <h2>CONTROLE DE IMPRESSÃO</h2>
+          <button
+            className="btn btn-full print-button"
+            onClick={imprimirPeloRele}
+            disabled={releOcupado}
+            title="Acionar o relé Bluetooth LUCENAART-RELE"
+          >
+            {releOcupado ? 'CONECTANDO...' : '▶ IMPRIMIR'}
+          </button>
+          <div className={`relay-status ${releConectado ? 'online' : ''}`}>
+            {releConectado ? '● RELÉ CONECTADO' : '● RELÉ DESCONECTADO'}
           </div>
         </section>
         <section className="content-section">

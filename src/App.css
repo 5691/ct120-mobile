@@ -25,3 +25,9 @@ label{display:block;font-size:16px;margin-bottom:6px}input[type=text],input:not(
 .variable-dialog-actions button{border:0;background:transparent;color:var(--royal);font-size:14px;min-height:44px;padding:8px 12px;cursor:pointer}
 .variable-dialog-actions button:focus-visible{outline:2px solid var(--royal)}
 
+
+/* LUCENAART — CONTROLE DE IMPRESSAO / RELE BLE */
+.print-button{background:#2E7D32!important;color:#fff!important;font-size:18px!important;font-weight:bold!important;min-height:52px!important}
+.print-button:active{filter:brightness(.88)}
+.relay-status{text-align:center;color:#777;font-weight:bold;font-size:12px;margin-top:8px}
+.relay-status.online{color:#208844}
