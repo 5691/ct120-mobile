@@ -1,15 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { BleClient } from '@capacitor-community/bluetooth-le'
-import { CapacitorBarcodeScanner, CapacitorBarcodeScannerTypeHint } from '@capacitor/barcode-scanner'
 import './App.css'
 
 const SERVICE_UUID = '0000fff0-0000-1000-8000-00805f9b34fb'
 const NOTIFY_UUID  = '0000fff1-0000-1000-8000-00805f9b34fb'
 const WRITE_UUID   = '0000fff2-0000-1000-8000-00805f9b34fb'
-
-const RELE_NAME = 'LUCENAART-PRINT'
-const RELE_SERVICE_UUID = '0000fff0-0000-1000-8000-00805f9b34fb'
-const RELE_WRITE_UUID = '0000fff2-0000-1000-8000-00805f9b34fb'
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -19,7 +14,7 @@ function App() {
   const [modo, setModo] = useState('text')
   const [retorno, setRetorno] = useState('')
   const [editorAberto, setEditorAberto] = useState(false)
-  const [etapaVariavel, setEtapaVariavel] = useState({ tipo: 'menu' })
+  const [aba, setAba] = useState('datetime')
   const [enviando, setEnviando] = useState(false)
   const [progresso, setProgresso] = useState(0)
   const [imagemNome, setImagemNome] = useState('')
@@ -29,11 +24,6 @@ function App() {
   const [trabalhos, setTrabalhos] = useState([])
   const [trabalhoSelecionado, setTrabalhoSelecionado] = useState('')
   const importarRef = useRef(null)
-  const bmpCatalogoRef = useRef(null)
-  const [codigoBmp, setCodigoBmp] = useState('')
-  const [resultadoCodigoBmp, setResultadoCodigoBmp] = useState('Exemplo de teste: 040.346.593.592-02 → AFT 484.bmp')
-  const [codigoDaPrevia, setCodigoDaPrevia] = useState('')
-  const [lendoCodigo, setLendoCodigo] = useState(false)
 
 
   // =========================================================
@@ -221,25 +211,19 @@ function App() {
     setRetorno('Bluetooth desconectado.')
   }
 
-  const [udiId, setUdiId] = useState('')
-  const editorBotaoRef = useRef(null)
-  const dialogoRef = useRef(null)
-
-  useEffect(() => {
-    if (!editorAberto) return
-    const dialogo = dialogoRef.current
-    dialogo?.querySelector('button, input')?.focus()
-    const rolagemAnterior = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.body.style.overflow = rolagemAnterior
-    }
-  }, [editorAberto, etapaVariavel])
-
-  function fecharEditor() {
-    setEditorAberto(false)
-    editorBotaoRef.current?.focus()
-  }
+  // Variáveis do editor
+  const [dateBlock, setDateBlock] = useState('0')
+  const [dateTimeFormat, setDateTimeFormat] = useState('dd-MM-yyyy  HH:mm')
+  const [dateFormat, setDateFormat] = useState('dd-MM-yyyy')
+  const [calendar, setCalendar] = useState('Gregorian')
+  const [timeFormat, setTimeFormat] = useState('HH:mm')
+  const [counterNum, setCounterNum] = useState('counter')
+  const [counterDigits, setCounterDigits] = useState('none')
+  const [thousands, setThousands] = useState(false)
+  const [shiftBlock, setShiftBlock] = useState('1')
+  const [dataCounter, setDataCounter] = useState('1')
+  const [dataColumn, setDataColumn] = useState('1')
+  const [udiId, setUdiId] = useState('1')
 
   const deviceRef = useRef(null)
   const writeRef = useRef(null)
@@ -248,11 +232,6 @@ function App() {
   const ackTimerRef = useRef(null)
   const expectedAckRef = useRef(-1)
   const abortRef = useRef(false)
-
-  // Relé de impressão — conexão independente do CT120.
-  const releDeviceRef = useRef(null)
-  const [releConectado, setReleConectado] = useState(false)
-  const [releOcupado, setReleOcupado] = useState(false)
 
   function arrayBufferToBase64(buffer) {
     let binary = ''
@@ -395,64 +374,6 @@ function App() {
     }
   }
 
-  async function conectarRele() {
-    await BleClient.initialize()
-
-    setRetorno(`Procurando ${RELE_NAME}...`)
-
-    const device = await BleClient.requestDevice({
-      services: [RELE_SERVICE_UUID],
-      name: RELE_NAME
-    })
-
-    setRetorno(`${device.name || RELE_NAME} encontrado. Conectando...`)
-
-    await BleClient.connect(device.deviceId, () => {
-      releDeviceRef.current = null
-      setReleConectado(false)
-      setRetorno('Controle de impressão desconectado.')
-    })
-
-    releDeviceRef.current = device
-    setReleConectado(true)
-    setRetorno(`✓ ${device.name || RELE_NAME} conectado — FFF0 / FFF2 pronto.`)
-
-    return device
-  }
-
-  async function imprimirPeloRele() {
-    if (releOcupado) return
-
-    setReleOcupado(true)
-
-    try {
-      let device = releDeviceRef.current
-
-      if (!device?.deviceId) {
-        device = await conectarRele()
-      }
-
-      // Comando confirmado no módulo real: "IMPRIMIR " com espaço final.
-      const bytes = new TextEncoder().encode('IMPRIMIR ')
-      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-
-      await BleClient.write(
-        device.deviceId,
-        RELE_SERVICE_UUID,
-        RELE_WRITE_UUID,
-        view
-      )
-
-      setRetorno('✓ Comando de impressão enviado.')
-    } catch (error) {
-      releDeviceRef.current = null
-      setReleConectado(false)
-      setRetorno(`ERRO NA IMPRESSÃO: ${error?.message || String(error)}`)
-    } finally {
-      setReleOcupado(false)
-    }
-  }
-
   function prepararDados() {
     if (modo === 'image') {
       if (!imagemBase64) throw new Error('Selecione uma imagem primeiro')
@@ -524,11 +445,6 @@ function App() {
 
   async function enviar() {
     try {
-      if (modo === 'image' && codigoDaPrevia && codigoDaPrevia !== codigoBmp.trim()) {
-        limparBmpDaPrevia()
-        setResultadoCodigoBmp('Código alterado. Toque em LOCALIZAR BMP.')
-        throw new Error('Localize o BMP do código atual antes de enviar.')
-      }
       const data = prepararDados()
       setRetorno('Enviando ao CT120...')
       await enviarPacotes(modo, data, modo === 'image' ? imagemNome : '')
@@ -549,91 +465,39 @@ function App() {
 
   function adicionarToken(token) {
     setTexto(prev => prev + token)
-    fecharEditor()
+    setEditorAberto(false)
   }
 
-  function listaVariaveis() {
-    const etapa = etapaVariavel
-    const numeros = Array.from({ length: 20 }, (_, i) => i + 1)
-    const ir = tipo => setEtapaVariavel({ tipo })
-    const escolherFormato = formatos => formatos.map(formato => ({
-      rotulo: formato,
-      escolher: () => setEtapaVariavel({ tipo: 'bloco', formato }),
-    }))
+  function dateName() {
+    const n = Number(dateBlock)
+    return n > 0 ? `date${n}` : 'date'
+  }
 
-    switch (etapa.tipo) {
-      case 'menu':
-        return { titulo: 'Editor de Variáveis', itens: [
-          { rotulo: 'Data e Hora', escolher: () => ir('dataHora') },
-          { rotulo: 'Contador', escolher: () => ir('contador') },
-          { rotulo: 'Turno', escolher: () => ir('turno') },
-          { rotulo: 'Dados', escolher: () => ir('dados') },
-          { rotulo: 'UDI', escolher: () => { setUdiId(''); ir('udi') } },
-        ] }
-      case 'dataHora':
-        return { titulo: 'Data e Hora', itens: [
-          { rotulo: 'Data e Hora', escolher: () => ir('formatoDataHora') },
-          { rotulo: 'Data', escolher: () => ir('formatoData') },
-          { rotulo: 'Hora', escolher: () => ir('formatoHora') },
-        ] }
-      case 'formatoDataHora':
-        return { titulo: 'Data e Hora', itens: escolherFormato([
-          'dd/MM/yyyy  hh:mm  AP', 'dd/MM/yyyy  hh:mm  ap',
-          'dd/MM/yyyy  hh:mm:ss', 'dd/MM/yyyy  HH:mm:ss', 'dd/MM/yyyy  HH:mm',
-          'dd-MM-yyyy  hh:mm  AP', 'dd-MM-yyyy  hh:mm  ap',
-          'dd-MM-yyyy  hh:mm:ss', 'dd-MM-yyyy  HH:mm:ss', 'dd-MM-yyyy  HH:mm',
-        ]) }
-      case 'formatoData':
-        return { titulo: 'Data', itens: escolherFormato([
-          'dd/MM/yyyy', 'dd/MM/yy', 'dd-MM-yyyy', 'dd-MM-yy',
-          'dd.MM.yyyy', 'dd.MM.yy', 'MM/yyyy', 'MM/yy', 'yyyy', 'yy', 'MM', 'dd',
-        ]) }
-      case 'formatoHora':
-        return { titulo: 'Hora', itens: escolherFormato([
-          'hh:mm:ss', 'HH:mm', 'hh:mm', 'HH:mm:ss', 'HH', 'mm', 'ss',
-        ]) }
-      case 'bloco':
-        return { titulo: 'Bloco de data/hora', itens: Array.from({ length: 8 }, (_, n) => ({
-          rotulo: n === 0 ? 'Hora atual' : 'Bloco ' + n,
-          escolher: () => adicionarToken('${#31#%' + etapa.formato + '%' + (n === 0 ? 'date' : 'date' + n) + '}'),
-        })) }
-      case 'contador':
-        return { titulo: 'Contador', itens: ['counter', ...numeros].map(n => ({
-          rotulo: String(n),
-          escolher: () => setEtapaVariavel({ tipo: 'digitos', contador: n === 'counter' ? n : 'counter' + n }),
-        })) }
-      case 'digitos':
-        return { titulo: 'Dígitos', itens: Array.from({ length: 7 }, (_, n) => ({
-          rotulo: n === 0 ? 'Sem formato' : n + (n === 1 ? ' dígito' : ' dígitos'),
-          escolher: () => adicionarToken(n === 0
-            ? '${%d%' + etapa.contador + '}'
-            : '${#0#%0' + n + 'd%' + etapa.contador + '}'),
-        })) }
-      case 'turno':
-        return { titulo: 'Bloco de turno', itens: numeros.map(n => ({
-          rotulo: 'Turno ' + n,
-          escolher: () => adicionarToken('${schedule' + n + '}'),
-        })) }
-      case 'dados':
-        return { titulo: 'Dados', itens: [
-          { rotulo: 'Dados XLSX', escolher: () => ir('contadorXlsx') },
-          { rotulo: 'Dados TXT', escolher: () => adicionarToken('${%txt}') },
-        ] }
-      case 'contadorXlsx':
-        return { titulo: 'Contador XLSX', itens: numeros.map(n => ({
-          rotulo: 'Contador ' + n,
-          escolher: () => setEtapaVariavel({ tipo: 'coluna', contador: n }),
-        })) }
-      case 'coluna':
-        return { titulo: 'Coluna', itens: numeros.map(n => ({
-          rotulo: 'Coluna ' + n,
-          escolher: () => adicionarToken('${%c' + etapa.contador + '%xlsx' + n + '}'),
-        })) }
-      case 'udi':
-        return { titulo: 'UDI', itens: [] }
-      default:
-        return { titulo: 'Editor de Variáveis', itens: [] }
+  function addDateTime() {
+    adicionarToken('${#31#%' + dateTimeFormat + '%' + dateName() + '}')
+  }
+
+  function addDate() {
+    let prefix = '#31#%'
+    if (calendar !== 'Gregorian') prefix += calendar + '_'
+    adicionarToken('${' + prefix + dateFormat + '%' + dateName() + '}')
+  }
+
+  function addTime() {
+    adicionarToken('${#31#%' + timeFormat + '%' + dateName() + '}')
+  }
+
+  function addCounter() {
+    const c = counterNum === 'counter' ? 'counter' : `counter${counterNum}`
+    let token
+    if (counterDigits === 'none') {
+      token = thousands ? '${#0T#%d%' + c + '}' : '${%d%' + c + '}'
+    } else {
+      token = thousands
+        ? '${#0T#%0' + counterDigits + 'd%' + c + '}'
+        : '${#0#%0' + counterDigits + 'd%' + c + '}'
     }
+    adicionarToken(token)
   }
 
   function clampUdi() {
@@ -659,179 +523,8 @@ function App() {
     reader.readAsDataURL(file)
   }
 
-  // =========================================================
-  // CÓDIGO DE BARRAS / QR CODE → BMP — catálogo local
-  // =========================================================
-  const CODIGO_TESTE = '040.346.593.592-02'
-  const CATALOGO_BMP_KEY = 'catalogo_codigo_bmp_v1'
-  const LIMITE_BMP_BYTES = 10 * 1024 * 1024
-
-  function carregarCatalogoBmp() {
-    try {
-      const catalogo = JSON.parse(localStorage.getItem(CATALOGO_BMP_KEY) || '{}')
-      return catalogo && typeof catalogo === 'object' && !Array.isArray(catalogo) ? catalogo : {}
-    } catch {
-      return {}
-    }
-  }
-
-  function salvarCatalogoBmp(catalogo) {
-    localStorage.setItem(CATALOGO_BMP_KEY, JSON.stringify(catalogo))
-  }
-
-  function base64ParaBytes(base64) {
-    const binario = atob(base64)
-    const bytes = new Uint8Array(binario.length)
-    for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i)
-    return bytes
-  }
-
-  function validarBmpBase64(base64) {
-    const bytes = base64ParaBytes(base64)
-    if (bytes.length < 54 || bytes[0] !== 0x42 || bytes[1] !== 0x4d) {
-      throw new Error('Selecione um arquivo BMP válido.')
-    }
-    if (bytes.length > LIMITE_BMP_BYTES) throw new Error('BMP maior que 10 MB.')
-    return bytes
-  }
-
-  function mostrarBmpCatalogo(nome, base64, codigo = '') {
-    validarBmpBase64(base64)
-    setModo('image')
-    setImagemNome(nome)
-    setImagemBase64(base64)
-    setPreview(`data:image/bmp;base64,${base64}`)
-    setCodigoDaPrevia(codigo)
-    setProgresso(0)
-  }
-
-  function limparBmpDaPrevia() {
-    setCodigoDaPrevia('')
-    setImagemNome('')
-    setImagemBase64('')
-    setPreview('')
-    setProgresso(0)
-  }
-
-  function alterarCodigoBmp(valor) {
-    const novo = valor
-    if (codigoDaPrevia && codigoDaPrevia !== novo.trim() && !enviando) {
-      limparBmpDaPrevia()
-      setResultadoCodigoBmp('Código alterado. Toque em LOCALIZAR BMP.')
-    }
-    setCodigoBmp(novo)
-  }
-
-  function buscarCodigoBmp(codigoForcado = '') {
-    if (enviando) {
-      setRetorno('Pare o envio antes de trocar a imagem.')
-      return
-    }
-    const chave = (codigoForcado || codigoBmp).trim()
-    if (!chave) {
-      setRetorno('Leia ou digite o código primeiro.')
-      return
-    }
-
-    limparBmpDaPrevia()
-    try {
-      const catalogo = carregarCatalogoBmp()
-      const registro = catalogo[chave]
-
-      if (!registro) {
-        setResultadoCodigoBmp(`Nenhum BMP cadastrado para ${chave}.`)
-        setRetorno('Selecione o BMP correto e toque em VINCULAR BMP.')
-        return
-      }
-
-      validarBmpBase64(registro.base64)
-      mostrarBmpCatalogo(registro.nome, registro.base64, chave)
-      setResultadoCodigoBmp(`${chave} → ${registro.nome}`)
-      setRetorno(`✓ ${chave} → ${registro.nome}`)
-    } catch (error) {
-      limparBmpDaPrevia()
-      setResultadoCodigoBmp(`Não foi possível carregar o BMP de ${chave}.`)
-      setRetorno(`ERRO: ${error?.message || String(error)}`)
-    }
-  }
-
-  async function lerCodigoBmp() {
-    if (enviando || lendoCodigo) return
-    setLendoCodigo(true)
-    try {
-      const leitura = await CapacitorBarcodeScanner.scanBarcode({
-        hint: CapacitorBarcodeScannerTypeHint.ALL,
-        scanInstructions: 'Aponte a câmera para o código de barras ou QR Code'
-      })
-      const chave = String(leitura?.ScanResult || '').trim()
-      if (!chave) return
-      setCodigoBmp(chave)
-      buscarCodigoBmp(chave)
-    } catch (error) {
-      const mensagem = error?.message || String(error)
-      if (!/cancel/i.test(mensagem)) setRetorno(`ERRO NO LEITOR: ${mensagem}`)
-    } finally {
-      setLendoCodigo(false)
-    }
-  }
-
-  function vincularCodigoBmp() {
-    if (enviando) {
-      setRetorno('Pare o envio antes de trocar a imagem.')
-      return
-    }
-    const chave = codigoBmp.trim()
-    if (!chave) {
-      setRetorno('Leia ou digite o código primeiro.')
-      return
-    }
-    if (!imagemBase64) {
-      setRetorno('Selecione uma imagem BMP primeiro.')
-      return
-    }
-
-    try {
-      validarBmpBase64(imagemBase64)
-      const catalogo = carregarCatalogoBmp()
-      const substituindo = Boolean(catalogo[chave]) || chave === CODIGO_TESTE
-      const mensagem = `${chave} → ${imagemNome || 'imagem.bmp'}\n\nConfira o código e a imagem antes de salvar.`
-      if (!window.confirm(`${substituindo ? 'Substituir vínculo?' : 'Vincular BMP'}\n\n${mensagem}`)) return
-
-      catalogo[chave] = { nome: imagemNome || 'imagem.bmp', base64: imagemBase64 }
-      salvarCatalogoBmp(catalogo)
-      setCodigoDaPrevia(chave)
-      setResultadoCodigoBmp(`Vínculo salvo: ${chave} → ${imagemNome || 'imagem.bmp'}`)
-      setRetorno('✓ Vínculo salvo no iPhone.')
-    } catch (error) {
-      setRetorno(`ERRO: ${error?.message || String(error)}`)
-    }
-  }
-
-  function selecionarBmpCatalogo(event) {
-    const file = event.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      try {
-        const dataUrl = String(reader.result)
-        const comma = dataUrl.indexOf(',')
-        const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl
-        validarBmpBase64(b64)
-        mostrarBmpCatalogo(file.name, b64)
-        setResultadoCodigoBmp(`BMP selecionado: ${file.name}. Digite o código e toque em VINCULAR BMP.`)
-        setRetorno(`Imagem selecionada: ${file.name}`)
-      } catch (error) {
-        limparBmpDaPrevia()
-        setResultadoCodigoBmp('Imagem não carregada.')
-        setRetorno(`ERRO: ${error?.message || String(error)}`)
-      } finally {
-        event.target.value = ''
-      }
-    }
-    reader.readAsDataURL(file)
-  }
-
-  const dialogoVariavel = listaVariaveis()
+  const numeros20 = Array.from({ length: 20 }, (_, i) => String(i + 1))
+  const digitos19 = Array.from({ length: 19 }, (_, i) => String(i + 1))
 
   const conectado = status.startsWith('CT120 CONECTADO')
 
@@ -864,20 +557,6 @@ function App() {
             <button className="btn" onClick={desconectarCT120} disabled={enviando}>DESCONECTAR</button>
           </div>
         </section>
-        <section className="print-section">
-          <h2>CONTROLE DE IMPRESSÃO</h2>
-          <button
-            className="btn btn-full print-button"
-            onClick={imprimirPeloRele}
-            disabled={releOcupado}
-            title="Iniciar impressão via Bluetooth"
-          >
-            {releOcupado ? 'CONECTANDO...' : '▶ INICIAR IMPRESSÃO'}
-          </button>
-          <div className={`relay-status ${releConectado ? 'online' : ''}`}>
-            {releConectado ? '● IMPRESSÃO CONECTADA' : '● IMPRESSÃO DESCONECTADA'}
-          </div>
-        </section>
         <section className="content-section">
           <h2>ENVIO AO CT120</h2>
           <label htmlFor="tipo-envio">Tipo de envio</label>
@@ -894,37 +573,14 @@ function App() {
             </div>
           )}
           {modo === 'variable' && (
-            <button className="btn btn-full" disabled={enviando} ref={editorBotaoRef} onClick={() => { setEtapaVariavel({ tipo: 'menu' }); setEditorAberto(true) }}>EDITOR DE VARIÁVEIS</button>
+            <button className="btn btn-full" disabled={enviando} onClick={() => setEditorAberto(true)}>EDITOR DE VARIÁVEIS</button>
           )}
           {modo === 'image' && (
             <div className="image-panel">
-              <button type="button" className="btn btn-full" disabled={enviando}
-                onClick={() => bmpCatalogoRef.current?.click()}>
-                SELECIONAR IMAGEM BMP
-              </button>
-              <input ref={bmpCatalogoRef} type="file" accept=".bmp,image/bmp,image/x-ms-bmp"
-                disabled={enviando} onChange={selecionarBmpCatalogo} style={{ display: 'none' }} />
-              <div style={{ marginTop: '16px' }}>
-                <strong style={{ color: '#2467b4' }}>CÓDIGO DE BARRAS / QR CODE → BMP</strong>
-                <input
-                  type="text"
-                  value={codigoBmp}
-                  onChange={e => alterarCodigoBmp(e.target.value)}
-                  disabled={enviando}
-                  placeholder="Leia ou digite o código"
-                  style={{ width: '100%', marginTop: '10px', boxSizing: 'border-box' }}
-                />
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '10px', marginTop: '10px' }}>
-                  <button className="btn" style={{ minWidth: 0, width: '100%', paddingLeft: '6px', paddingRight: '6px' }} disabled={enviando || lendoCodigo} onClick={lerCodigoBmp}>
-                    {lendoCodigo ? 'LENDO...' : 'LER CÓDIGO'}
-                  </button>
-                  <button className="btn" style={{ minWidth: 0, width: '100%', paddingLeft: '6px', paddingRight: '6px' }} disabled={enviando} onClick={() => buscarCodigoBmp()}>LOCALIZAR BMP</button>
-                </div>
-                <button className="btn btn-full" style={{ marginTop: '10px', width: '100%' }} disabled={enviando} onClick={vincularCodigoBmp}>
-                  VINCULAR BMP AO CÓDIGO
-                </button>
-                <div style={{ marginTop: '12px', whiteSpace: 'pre-wrap' }}>{resultadoCodigoBmp}</div>
-              </div>
+              <label className="file-picker">
+                <span>SELECIONAR IMAGEM BMP</span>
+                <input type="file" accept=".bmp,image/bmp,image/x-ms-bmp" disabled={enviando} onChange={selecionarImagem} />
+              </label>
               {preview && <img className="image-preview" src={preview} alt="Prévia da imagem" />}
               {imagemNome && <div className="image-name">{imagemNome}</div>}
             </div>
@@ -969,48 +625,127 @@ function App() {
 
       {editorAberto && (
         <div className="modal-overlay">
-          <div className="variable-modal" ref={dialogoRef} key={etapaVariavel.tipo}
-            role="dialog" aria-modal="true" aria-labelledby="variable-dialog-title"
-            onKeyDown={event => {
-              if (event.key === 'Escape') fecharEditor()
-              if (event.key === 'Tab') {
-                const controles = dialogoRef.current?.querySelectorAll('button, input')
-                if (!controles?.length) return
-                const primeiro = controles[0]
-                const ultimo = controles[controles.length - 1]
-                if (event.shiftKey && document.activeElement === primeiro) {
-                  event.preventDefault()
-                  ultimo.focus()
-                } else if (!event.shiftKey && document.activeElement === ultimo) {
-                  event.preventDefault()
-                  primeiro.focus()
-                }
-              }
-            }}>
-            <h2 id="variable-dialog-title" className="variable-dialog-title">{dialogoVariavel.titulo}</h2>
-            <div className="variable-dialog-content">
-              {etapaVariavel.tipo === 'udi' ? (
-                <input type="number" min="0" max="9999" inputMode="numeric"
-                  aria-label="ID UDI (0 a 9999)" placeholder="ID UDI (0 a 9999)"
-                  value={udiId} onChange={event => setUdiId(event.target.value)} />
-              ) : (
-                <div className="variable-options">
-                  {dialogoVariavel.itens.map(item => (
-                    <button type="button" key={item.rotulo} className="variable-option"
-                      onClick={item.escolher}>{item.rotulo}</button>
-                  ))}
-                </div>
-              )}
+          <div className="variable-modal">
+            <div className="modal-head">
+              <div>
+                <h2>Editor de Variáveis</h2>
+                <p>Selecione o tipo e adicione ao conteúdo.</p>
+              </div>
+              <button className="close-x" onClick={() => setEditorAberto(false)}>×</button>
             </div>
-            <div className="variable-dialog-actions">
-              <button type="button" onClick={fecharEditor}>CANCELAR</button>
-              {etapaVariavel.tipo === 'udi' && (
+
+            <div className="editor-tabs">
+              <button className={aba === 'datetime' ? 'active' : ''} onClick={() => setAba('datetime')}>Data e Hora</button>
+              <button className={aba === 'counter' ? 'active' : ''} onClick={() => setAba('counter')}>Contador</button>
+              <button className={aba === 'shift' ? 'active' : ''} onClick={() => setAba('shift')}>Turno</button>
+              <button className={aba === 'data' ? 'active' : ''} onClick={() => setAba('data')}>Dados</button>
+              <button className={aba === 'udi' ? 'active' : ''} onClick={() => setAba('udi')}>UDI</button>
+            </div>
+
+            <div className="editor-body">
+              {aba === 'datetime' && (
                 <>
-                  <button type="button" onClick={() => adicionarToken('${udia' + clampUdi() + '}')}>GS1</button>
-                  <button type="button" onClick={() => adicionarToken('${udi' + clampUdi() + '}')}>ADICIONAR</button>
+                  <h3>Data e Hora</h3>
+                  <div className="form-row">
+                    <label>Bloco
+                      <select value={dateBlock} onChange={e => setDateBlock(e.target.value)}>
+                        <option value="0">Hora atual</option>
+                        {Array.from({ length: 7 }, (_, i) => String(i + 1)).map(n => <option key={n} value={n}>Bloco {n}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="form-row">
+                    <select value={dateTimeFormat} onChange={e => setDateTimeFormat(e.target.value)}>
+                      {['dd/MM/yyyy  hh:mm  AP','dd/MM/yyyy  hh:mm  ap','dd/MM/yyyy  hh:mm:ss','dd/MM/yyyy  HH:mm:ss','dd/MM/yyyy  HH:mm','dd-MM-yyyy  hh:mm  AP','dd-MM-yyyy  hh:mm  ap','dd-MM-yyyy  hh:mm:ss','dd-MM-yyyy  HH:mm:ss','dd-MM-yyyy  HH:mm'].map(x => <option key={x}>{x}</option>)}
+                    </select>
+                    <button className="btn btn-success" onClick={addDateTime}>Adicionar Data/Hora</button>
+                  </div>
+                  <div className="form-row">
+                    <select value={dateFormat} onChange={e => setDateFormat(e.target.value)}>
+                      {['dd/MM/yyyy','dd/MM/yy','dd-MM-yyyy','dd-MM-yy','dd.MM.yyyy','dd.MM.yy','MM/yyyy','MM/yy','yyyy','yy','MM','dd'].map(x => <option key={x}>{x}</option>)}
+                    </select>
+                    <button className="btn btn-success" onClick={addDate}>Adicionar Data</button>
+                  </div>
+                  <div className="form-row">
+                    <select value={timeFormat} onChange={e => setTimeFormat(e.target.value)}>
+                      {['hh:mm:ss','HH:mm','hh:mm','HH:mm:ss','HH','mm','ss'].map(x => <option key={x}>{x}</option>)}
+                    </select>
+                    <button className="btn btn-success" onClick={addTime}>Adicionar Hora</button>
+                  </div>
+                </>
+              )}
+
+              {aba === 'counter' && (
+                <>
+                  <h3>Contador</h3>
+                  <div className="form-row">
+                    <select value={counterNum} onChange={e => setCounterNum(e.target.value)}>
+                      <option value="counter">counter</option>
+                      {numeros20.map(n => <option key={n}>{n}</option>)}
+                    </select>
+                    <select value={counterDigits} onChange={e => setCounterDigits(e.target.value)}>
+                      <option value="none">Nenhum</option>
+                      {digitos19.map(n => <option key={n} value={n}>{n} dígitos</option>)}
+                    </select>
+                    <label className="check-line">
+                      <input type="checkbox" checked={thousands} onChange={e => setThousands(e.target.checked)} />
+                      Separador de milhares
+                    </label>
+                  </div>
+                  <button className="btn btn-success btn-full" onClick={addCounter}>Adicionar Contador</button>
+                </>
+              )}
+
+              {aba === 'shift' && (
+                <>
+                  <h3>Turno</h3>
+                  <div className="form-row">
+                    <select value={shiftBlock} onChange={e => setShiftBlock(e.target.value)}>
+                      {numeros20.map(n => <option key={n}>{n}</option>)}
+                    </select>
+                    <button className="btn btn-success" onClick={() => adicionarToken('${schedule' + shiftBlock + '}')}>Adicionar Turno</button>
+                  </div>
+                </>
+              )}
+
+              {aba === 'data' && (
+                <>
+                  <h3>Dados</h3>
+                  <div className="form-row">
+                    <label>Contador
+                      <select value={dataCounter} onChange={e => setDataCounter(e.target.value)}>
+                        {numeros20.map(n => <option key={n}>{n}</option>)}
+                      </select>
+                    </label>
+                    <label>Coluna
+                      <select value={dataColumn} onChange={e => setDataColumn(e.target.value)}>
+                        {['1','2','3','4','5'].map(n => <option key={n}>{n}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="form-row">
+                    <button className="btn btn-success" onClick={() => adicionarToken('${%c' + dataCounter + '%xlsx' + dataColumn + '}')}>Adicionar dados XLSX</button>
+                    <button className="btn btn-success" onClick={() => adicionarToken('${%txt}')}>Adicionar dados TXT</button>
+                  </div>
+                </>
+              )}
+
+              {aba === 'udi' && (
+                <>
+                  <h3>UDI</h3>
+                  <input type="number" min="0" max="9999" value={udiId} onChange={e => setUdiId(e.target.value)} />
+                  <div className="form-row udi-buttons">
+                    <button className="btn btn-success" onClick={() => { const id = clampUdi(); adicionarToken('${udi' + id + '}') }}>Adicionar</button>
+                    <button className="btn btn-success" onClick={() => { const id = clampUdi(); adicionarToken('${udia' + id + '}') }}>Adicionar GS1</button>
+                    <button className="btn btn-success" onClick={() => { const id = clampUdi(); adicionarToken('(' + String(id).padStart(2,'0') + ')' + '${udi' + id + '}') }}>Adicionar (AI)</button>
+                    <button className="btn btn-success" onClick={() => { const id = clampUdi(); adicionarToken('[' + String(id).padStart(2,'0') + ']' + '${udi' + id + '}') }}>Adicionar [AI]</button>
+                    <button className="btn btn-success" onClick={() => adicionarToken('${udia0}')}>Gerar UDI DM</button>
+                  </div>
                 </>
               )}
             </div>
+
+            <button className="btn btn-danger btn-full" onClick={() => setEditorAberto(false)}>FECHAR</button>
           </div>
         </div>
       )}
@@ -1019,4 +754,3 @@ function App() {
 }
 
 export default App
-
