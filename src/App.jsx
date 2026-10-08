@@ -401,8 +401,7 @@ function App() {
     setRetorno(`Procurando ${RELE_NAME}...`)
 
     const device = await BleClient.requestDevice({
-      services: [RELE_SERVICE_UUID],
-      name: RELE_NAME
+      optionalServices: [RELE_SERVICE_UUID]
     })
 
     setRetorno(`${device.name || RELE_NAME} encontrado. Conectando...`)
