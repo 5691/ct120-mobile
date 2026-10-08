@@ -400,9 +400,47 @@ function App() {
 
     setRetorno(`Procurando ${RELE_NAME}...`)
 
-    const device = await BleClient.requestDevice({
-      optionalServices: [RELE_SERVICE_UUID]
-    })
+    // Busca automática no iPhone, sem abrir a lista de dispositivos.
+    let device = null
+    let timer = null
+    try {
+      device = await new Promise(async (resolve, reject) => {
+        let concluido = false
+        const finalizar = (resultado, erro) => {
+          if (concluido) return
+          concluido = true
+          if (timer) clearTimeout(timer)
+          if (erro) reject(erro)
+          else resolve(resultado)
+        }
+
+        timer = setTimeout(() => finalizar(null), 10000)
+        try {
+          await BleClient.requestLEScan({ allowDuplicates: false }, result => {
+            const encontrado = result?.device
+            const nome = encontrado?.name || result?.localName || ''
+            if (nome.trim().toUpperCase() === RELE_NAME) {
+              finalizar(encontrado)
+            }
+          })
+        } catch (erro) {
+          finalizar(null, erro)
+        }
+      })
+    } catch (erro) {
+      setRetorno(`Busca automática indisponível: ${erro?.message || String(erro)}`)
+    } finally {
+      if (timer) clearTimeout(timer)
+      try { await BleClient.stopLEScan() } catch { /* busca já encerrada */ }
+    }
+
+    // Alternativa manual caso a busca automática não encontre a placa.
+    if (!device) {
+      setRetorno(`${RELE_NAME} não encontrado automaticamente. Selecione na lista.`)
+      device = await BleClient.requestDevice({
+        optionalServices: [RELE_SERVICE_UUID]
+      })
+    }
 
     setRetorno(`${device.name || RELE_NAME} encontrado. Conectando...`)
 
