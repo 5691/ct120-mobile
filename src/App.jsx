@@ -1,3 +1,6 @@
+import EditorImagem from './EditorImagem.jsx'
+import Codigos, {Icones} from './Codigos.jsx'
+import Industrial from './Industrial.jsx'
 import { useEffect, useRef, useState } from 'react'
 import { BleClient } from '@capacitor-community/bluetooth-le'
 import { CapacitorBarcodeScanner, CapacitorBarcodeScannerTypeHint } from '@capacitor/barcode-scanner'
@@ -13,9 +16,19 @@ const RELE_WRITE_UUID = '0000fff2-0000-1000-8000-00805f9b34fb'
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
+const iconPaths = {"save": "M4 3h14l3 3v15H3V3h1 M7 3v7h10V3 M7 21v-8h10v8", "folder": "M3 6h7l2 3h9v11H3z", "send": "M3 10l18-7-7 18-4-8z M10 13L21 3", "trash": "M4 6h16 M9 6V3h6v3 M6 6l1 15h10l1-15 M10 10v7 M14 10v7", "texto": "M5 5h14 M12 5v14 M8 19h8 M5 5v3 M19 5v3", "variaveis": "M9 3H7l-1 7-3 2 3 2 1 7h2 M15 3h2l1 7 3 2-3 2-1 7h-2", "codigos": "M3 4v16 M6 4v16 M10 4v16 M12 4v16 M16 4v16 M21 4v16", "imagens": "M3 3h18v18H3z M3 17l6-6 4 4 3-3 5 5 M7 7h2v2H7z", "grid": "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z", "novo": "M5 3h10l4 4v7 M5 3v18h8 M15 3v5h4 M8 12h7 M18 15v8 M14 19h8", "bluetooth": "M12 2v20l7-6-14-9 M12 2l7 6-14 9"}
+function Icon({name}) { return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={iconPaths[name] || iconPaths.grid}/></svg> }
+
 function App() {
+  useEffect(() => { document.title = "CT DESTROYER — BY LUCENAART" }, [])
+  const [efeito, setEfeito] = useState("")
+  const [fonteEfeito, setFonteEfeito] = useState("Arial")
+  const [boldE,setBoldE]=useState(false),[italicE,setItalicE]=useState(false),[sizeE,setSizeE]=useState(64),[strokeE,setStrokeE]=useState(1),[marginE,setMarginE]=useState(6),[extraMenu,setExtraMenu]=useState(''),[fonts,setFonts]=useState(()=>{try{return JSON.parse(localStorage.getItem('ct-fonts')||'[]')}catch{return []}})
+  useEffect(()=>{fonts.forEach(async f=>{try{const face=await new FontFace(f.name,`url(${f.data})`).load();document.fonts.add(face)}catch{}})},[fonts])
+  async function importFont(e){const f=e.target.files?.[0];if(!f)return;try{const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(f)});const name='CTFont'+Date.now();const face=await new FontFace(name,`url(${data})`).load();document.fonts.add(face);const next=[...fonts,{name,label:f.name,data}];localStorage.setItem('ct-fonts',JSON.stringify(next));setFonts(next);setFonteEfeito(name)}catch{setRetorno('Não foi possível importar a fonte.')}e.target.value=''}
   const [status, setStatus] = useState('Desconectado')
-  const [texto, setTexto] = useState('TESTE LUCENAART')
+  const [texto, setTexto] = useState('')
+  const [painel, setPainel] = useState('texto')
   const [modo, setModo] = useState('text')
   const [retorno, setRetorno] = useState('')
   const [editorAberto, setEditorAberto] = useState(false)
@@ -873,6 +886,7 @@ function App() {
   const conectado = status.startsWith('CT120 CONECTADO')
 
   function limparConteudo() {
+    setCodigoDaPrevia('')
     setTexto('')
     setImagemNome('')
     setImagemBase64('')
@@ -881,59 +895,58 @@ function App() {
     setProgresso(0)
   }
 
+  function bitmapIndustrial(c,nome) {
+    const w=c.width,h=c.height,stride=Math.ceil(w/32)*4;
+    const b=new Uint8Array(62+stride*h),v=new DataView(b.buffer),d=c.getContext('2d').getImageData(0,0,w,h).data;
+    b[0]=66;b[1]=77;v.setUint32(2,b.length,true);v.setUint32(10,62,true);v.setUint32(14,40,true);v.setInt32(18,w,true);v.setInt32(22,h,true);v.setUint16(26,1,true);v.setUint16(28,1,true);v.setUint32(34,stride*h,true);v.setUint32(46,2,true);b.set([255,255,255,0],58);
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(d[(y*w+x)*4]>127)b[62+(h-1-y)*stride+(x>>3)]|=128>>(x%8);
+    let raw='';for(const byte of b)raw+=String.fromCharCode(byte);
+    mostrarBmpCatalogo(nome,btoa(raw));setPreview(c.toDataURL());setPainel('area');
+  }
+  function aplicarEfeito() {
+    if (!texto.trim()) {setRetorno('Digite o conteúdo primeiro.');setEfeito('');return}
+    const c=document.createElement('canvas');c.width=480;c.height=240;const x=c.getContext('2d');
+    const linhas=texto.split('\n');let size=Math.min(sizeE,Math.floor((240-2*marginE)/linhas.length));
+    do {x.font=`${italicE?"italic ":""}${boldE?"bold ":""}${size}px ${fonteEfeito}`;if(linhas.every(l=>x.measureText(l).width<=480-2*marginE))break;size--}while(size>8);
+    x.fillStyle=efeito==='negativo'?'black':'white';x.fillRect(0,0,480,240);x.fillStyle=efeito==='negativo'?'white':'black';x.strokeStyle=x.fillStyle;x.lineWidth=strokeE;x.textBaseline='top';
+    linhas.forEach((l,i)=>{if(efeito==='vazado')x.strokeText(l,marginE,marginE+i*size);else x.fillText(l,marginE,marginE+i*size)});
+    const data=x.getImageData(0,0,480,240).data;const stride=60;const b=new Uint8Array(62+stride*240);const v=new DataView(b.buffer);b[0]=66;b[1]=77;v.setUint32(2,b.length,true);v.setUint32(10,62,true);v.setUint32(14,40,true);v.setInt32(18,480,true);v.setInt32(22,240,true);v.setUint16(26,1,true);v.setUint16(28,1,true);v.setUint32(34,stride*240,true);v.setUint32(46,2,true);b.set([255,255,255,0],58);
+    for(let y=0;y<240;y++)for(let a=0;a<480;a++)if(data[(y*480+a)*4]>127)b[62+(239-y)*stride+(a>>3)]|=128>>(a%8);
+    mostrarBmpCatalogo('texto-efeito.bmp',btoa(Array.from(b,n=>String.fromCharCode(n)).join('')));setPreview(c.toDataURL());setEfeito('');setPainel('area');
+  }
   return (
     <div className="app-shell">
       <header className="topbar">
         <img className="brand-logo" src="/logo-lucenaart.jpg" alt="Lucenaart do Brasil"
           onError={e => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling.hidden = false }} />
         <div className="brand-fallback" hidden>LUCENAART <small>DO BRASIL</small></div>
-        <div className="product-title">CT120 MANAGER</div>
+        <div className="product-title">CT DESTROYER — BY LUCENAART</div>
         <div className="brand-tagline">A SUA PRODUÇÃO NÃO PODE PARAR</div>
       </header>
       <main className="workspace">
-        <section className="connection-section">
-          <h2>CONEXÃO</h2>
-          <div className={`connection-status ${conectado ? 'online' : ''}`} role="status">
-            <span aria-hidden="true">●</span> {status}
-          </div>
-          <div className="connection-buttons">
-            <button className="btn" onClick={conectarCT120} disabled={enviando}>PROCURAR DISPOSITIVO</button>
-            <button className="btn" onClick={desconectarCT120} disabled={enviando}>DESCONECTAR</button>
-          </div>
+        <div className={`connection-status ${conectado ? 'online' : ''}`}>● {status}</div>
+        <section className="work-area">
+          <h2>ÁREA DE TRABALHO</h2>
+          <div className="work-preview">{modo === 'image' ? (preview ? <img src={preview} alt="Prévia" /> : 'Selecione uma imagem') : (texto || 'Novo trabalho • Digite um texto ou gere um código')}</div>
         </section>
-        <section className="print-section">
-          <h2>CONTROLE DE IMPRESSÃO</h2>
-          <button
-            className="btn btn-full print-button"
-            onClick={imprimirPeloRele}
-            disabled={releOcupado}
-            title="Iniciar impressão via Bluetooth"
-          >
-            {releOcupado ? 'CONECTANDO...' : '▶ INICIAR IMPRESSÃO'}
-          </button>
-          <div className={`relay-status ${releConectado ? 'online' : ''}`}>
-            {releConectado ? '● IMPRESSÃO CONECTADA' : '● IMPRESSÃO DESCONECTADA'}
-          </div>
-        </section>
-        <section className="content-section">
-          <h2>ENVIO AO CT120</h2>
-          <label htmlFor="tipo-envio">Tipo de envio</label>
-          <select id="tipo-envio" value={modo} onChange={e => setModo(e.target.value)} disabled={enviando}>
-            <option value="text">Texto</option>
-            <option value="variable">Variável</option>
-            <option value="image">Imagem</option>
-          </select>
-          {modo !== 'image' && (
+        {['texto','variaveis','imagens','codigos','icones'].includes(painel) && (        <section className="content-section">
+          <h2>{painel.toUpperCase()}</h2>
+          {['texto','variaveis'].includes(painel) && (
             <div className="input-panel">
               <label htmlFor="conteudo">Conteúdo</label>
               <textarea id="conteudo" value={texto} onChange={e => setTexto(e.target.value)}
                 disabled={enviando} rows={5} placeholder="Digite o conteúdo para o CT120" />
+              {painel==='texto' && <button className="btn btn-full" disabled={enviando} onClick={()=>setEfeito('normal')}>EFEITOS DE TEXTO</button>}
+              <div className="edit-actions"><button className="btn" onClick={async()=>{try{await navigator.clipboard.writeText(texto)}catch{setRetorno('Não foi possível copiar.')}}}>Copiar</button><button className="btn" disabled={enviando} onClick={async()=>{try{setTexto(await navigator.clipboard.readText())}catch{setRetorno('Use a opção Colar do teclado.')}}}>Colar</button><button className="btn" disabled={enviando} onClick={()=>setTexto('')}>Remover</button><button className="btn" onClick={()=>setPainel('area')}>Voltar</button></div>
             </div>
           )}
-          {modo === 'variable' && (
+          {painel === 'variaveis' && (
             <button className="btn btn-full" disabled={enviando} ref={editorBotaoRef} onClick={() => { setEtapaVariavel({ tipo: 'menu' }); setEditorAberto(true) }}>EDITOR DE VARIÁVEIS</button>
           )}
-          {modo === 'image' && (
+          {painel==='codigos' && <Codigos onBitmap={bitmapIndustrial} disabled={enviando} onBack={()=>setPainel('area')} onRead={async()=>{try{const r=await CapacitorBarcodeScanner.scanBarcode({hint:CapacitorBarcodeScannerTypeHint.ALL,scanInstructions:'Aponte a câmera para o código'});return r?.ScanResult||''}catch(e){setRetorno(String(e.message||e));return ''}}}/> }
+          {painel==='icones' && <Icones onSymbol={v=>{setTexto(t=>t+v);setModo('text');setPainel('texto')}} onBitmap={bitmapIndustrial} disabled={enviando} onBack={()=>setPainel('area')}/>}
+          {painel==='imagens' && <EditorImagem onBitmap={bitmapIndustrial} disabled={enviando}/>}
+          {['imagens','codigos'].includes(painel) && (
             <div className="image-panel">
               <button type="button" className="btn btn-full" disabled={enviando}
                 onClick={() => bmpCatalogoRef.current?.click()}>
@@ -941,7 +954,7 @@ function App() {
               </button>
               <input ref={bmpCatalogoRef} type="file" accept=".bmp,image/bmp,image/x-ms-bmp"
                 disabled={enviando} onChange={selecionarBmpCatalogo} style={{ display: 'none' }} />
-              <div style={{ marginTop: '16px' }}>
+              {painel==='codigos' && <div style={{ marginTop: '16px' }}> 
                 <strong style={{ color: '#2467b4' }}>CÓDIGO DE BARRAS / QR CODE → BMP</strong>
                 <input
                   type="text"
@@ -961,14 +974,25 @@ function App() {
                   VINCULAR BMP AO CÓDIGO
                 </button>
                 <div style={{ marginTop: '12px', whiteSpace: 'pre-wrap' }}>{resultadoCodigoBmp}</div>
-              </div>
+              </div>}
               {preview && <img className="image-preview" src={preview} alt="Prévia da imagem" />}
               {imagemNome && <div className="image-name">{imagemNome}</div>}
             </div>
           )}
-          <button className="btn btn-full clear-button" disabled={enviando} onClick={limparConteudo}>LIMPAR TUDO</button>
+
+        </section>)}
+        <section className="work-controls">          <div className="work-actions">
+           <button className="btn save" disabled={enviando} onClick={() => { if(nomeTrabalho.trim()) salvarTrabalho(); else setPainel('trabalhos') }}><Icon name="save"/>SALVAR</button>
+           <button className="btn" disabled={enviando} onClick={() => setPainel('trabalhos')}><Icon name="folder"/>ABRIR</button>
+           <button className="btn" disabled={enviando || !conectado} onClick={enviar}><Icon name="send"/>ENVIAR</button>
+           <button className="btn clear" disabled={enviando} onClick={limparConteudo}><Icon name="trash"/>LIMPAR</button>
+          </div>
+          <button className="btn stop" disabled={!enviando} onClick={pararEnvio}>Parar envio</button>
+          <div className="progress-label">{enviando ? "ENVIANDO" : "AGUARDANDO ENVIO"} • {progresso}%</div><progress max="100" value={progresso} />
         </section>
-        <section className="jobs-section">
+        <nav className="nav-grid">{[['texto','texto','TEXTO'],['variaveis','variaveis','VARIÁVEIS'],['codigos','codigos','CÓDIGOS'],['imagens','imagens','IMAGENS'],['icones','grid','ÍCONES'],['area','grid','ÁREA'],['trabalhos','folder','TRABALHOS'],['novo','novo','NOVO'],['mais','grid','MAIS'],['bluetooth','bluetooth','BLUETOOTH']].map(([id,icone,nome]) => <button key={id} className={'btn '+(painel===id?'selected':'')} disabled={enviando} onClick={()=>{if(id==='novo'){novoTrabalho();setPainel('texto');return}setPainel(id);if(id==='texto')setModo('text');if(id==='variaveis')setModo('variable');if(id==='imagens')setModo('image')}}><Icon name={icone}/>{nome}</button>)}</nav>
+        {painel==='icones' && <section><h2>ÍCONES</h2><p>Biblioteca de impressão será incorporada na próxima etapa.</p></section>}
+        {painel==='trabalhos' && (        <section className="jobs-section">
           <h2>TRABALHOS SALVOS</h2>
           <input aria-label="Nome do trabalho" type="text" value={nomeTrabalho}
             onChange={e => setNomeTrabalho(e.target.value)} placeholder="Nome do trabalho" disabled={enviando} />
@@ -987,23 +1011,39 @@ function App() {
           </div>
           <input ref={importarRef} type="file" accept=".json,.ct120.json,application/json,text/json,text/plain"
             onChange={importarTrabalho} style={{ display: 'none' }} />
-        </section>
-        <section className="send-section">
-          <div className="send-buttons">
-            <button className="btn" disabled={enviando} onClick={enviar}>{enviando ? 'ENVIANDO...' : 'ENVIAR'}</button>
-            <button className="btn" disabled={!enviando} onClick={pararEnvio} title="Interromper o envio ao CT120">PARAR</button>
+        </section>)}
+        {painel==='bluetooth' && (<>        <section className="connection-section">
+          <h2>CONEXÃO</h2>
+          <div className={`connection-status ${conectado ? 'online' : ''}`} role="status">
+            <span aria-hidden="true">●</span> {status}
           </div>
-          <label className="progress-label" htmlFor="progresso">PROGRESSO DO ENVIO</label>
-          <progress id="progresso" max="100" value={progresso} aria-label="Progresso do envio" />
-        </section>
-        <section className="log-section">
-          <h2>LOG</h2>
-          <div className="result-box" role="status" aria-live="polite">
-            {retorno || `Pronto.\nTrabalhos encontrados: ${trabalhos.length}`}
+          <div className="connection-buttons">
+            <button className="btn" onClick={conectarCT120} disabled={enviando}>PROCURAR DISPOSITIVO</button>
+            <button className="btn" onClick={desconectarCT120} disabled={enviando}>DESCONECTAR</button>
           </div>
-        </section>
+        </section>        <section className="print-section">
+          <h2>CONTROLE DE IMPRESSÃO</h2>
+          <button
+            className="btn btn-full print-button"
+            onClick={imprimirPeloRele}
+            disabled={releOcupado}
+            title="Iniciar impressão via Bluetooth"
+          >
+            {releOcupado ? 'CONECTANDO...' : '▶ INICIAR IMPRESSÃO'}
+          </button>
+          <div className={`relay-status ${releConectado ? 'online' : ''}`}>
+            {releConectado ? '● IMPRESSÃO CONECTADA' : '● IMPRESSÃO DESCONECTADA'}
+          </div>
+        </section></>)}
+        {painel==='area' && <section><h2>ÁREA DE TRABALHO</h2><div className="result-box">{imagemNome || texto || 'Nenhum conteúdo'}</div></section>}
+        {painel==='mais' && (        <section className="log-section">
+          <Industrial onBitmap={bitmapIndustrial} disabled={enviando}/><div className="more-tools"><button className="btn" onClick={()=>setExtraMenu('links')}>VÍNCULOS SALVOS</button><button className="btn" disabled={releOcupado||enviando} onClick={imprimirPeloRele}>ACIONAR RELÉ</button><button className="btn" onClick={()=>setExtraMenu('log')}>DETALHES DO ENVIO</button></div>
+          {extraMenu&&<div className="modal-overlay"><div className="variable-modal effect-modal"><h2>{extraMenu==='links'?'VÍNCULOS SALVOS':'DETALHES DO ENVIO'}</h2>{extraMenu==='links'?<>{Object.entries(carregarCatalogoBmp()).length===0&&<p>Nenhum vínculo salvo.</p>}{Object.entries(carregarCatalogoBmp()).map(([key,r])=><div key={key}><p>{key} → {r.nome}</p><button className="btn" disabled={enviando} onClick={()=>{mostrarBmpCatalogo(r.nome,r.base64,key);setExtraMenu('');setPainel('area')}}>ABRIR</button><button className="btn" disabled={enviando} onClick={()=>{if(window.confirm('Excluir vínculo?')){const c=carregarCatalogoBmp();delete c[key];salvarCatalogoBmp(c);setExtraMenu('');}}}>EXCLUIR</button></div>)}</>:<div className="result-box" style={{whiteSpace:'pre-wrap'}}>{status} · {progresso}%<p>{retorno}</p></div>}<button className="btn btn-full" onClick={()=>setExtraMenu('')}>VOLTAR</button></div></div>}
+        </section>)}
+        {painel!=='mais' && <div className="result-box" role="status">{retorno}</div>}
       </main>
 
+      {efeito && <div className="modal-overlay"><div className="variable-modal effect-modal"><h2>EFEITOS DE TEXTO</h2><textarea value={texto} onChange={e=>setTexto(e.target.value)}/><select value={efeito} onChange={e=>setEfeito(e.target.value)}><option value="negativo">Negativo</option><option value="vazado">Vazado</option><option value="normal">Normal (imagem)</option></select><select value={fonteEfeito} onChange={e=>setFonteEfeito(e.target.value)}>{[['Arial','Sem serifa'],['Arial Black','Grossa'],['Georgia','Clássica serifada'],['Courier New','Máquina de escrever'],['Arial Narrow','Condensada'],['cursive','Manuscrita'],['sans-serif','Casual'],...fonts.map(f=>[f.name,f.label])].map(([v,n])=><option key={v} value={v}>{n}</option>)}</select><label className="btn btn-full">IMPORTAR FONTE TTF / OTF<input type="file" accept=".ttf,.otf" style={{display:'none'}} onChange={importFont}/></label><label><input type="checkbox" checked={boldE} onChange={e=>setBoldE(e.target.checked)}/> Negrito</label><label><input type="checkbox" checked={italicE} onChange={e=>setItalicE(e.target.checked)}/> Itálico</label>{[['Tamanho da letra',sizeE,setSizeE,8,160],['Espessura do contorno',strokeE,setStrokeE,1,10],['Margem',marginE,setMarginE,0,24]].map(([n,v,f,min,max])=><label key={n}>{n}: {v} px<input type="range" min={min} max={max} value={v} onChange={e=>f(+e.target.value)}/></label>)}<div className="effect-preview" style={{fontFamily:fonteEfeito,fontWeight:boldE?"bold":"normal",fontStyle:italicE?"italic":"normal",fontSize:sizeE,padding:marginE,background:efeito==='negativo'?'black':'white',color:efeito==='negativo'?'white':efeito==='vazado'?'transparent':'black',WebkitTextStroke:efeito==='vazado'?`${strokeE}px black`:undefined}}>{texto}</div><div className="edit-actions"><button className="btn" onClick={aplicarEfeito}>APLICAR</button><button className="btn" onClick={()=>setEfeito('')}>VOLTAR</button></div></div></div>}
       {editorAberto && (
         <div className="modal-overlay">
           <div className="variable-modal" ref={dialogoRef} key={etapaVariavel.tipo}
