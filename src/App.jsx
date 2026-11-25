@@ -1031,7 +1031,9 @@ function App() {
             <div className="input-panel">
               <label htmlFor="conteudo">Conteúdo</label>
               <textarea id="conteudo" value={texto} onChange={e => setTexto(e.target.value)}
-                disabled={enviando} rows={5} placeholder="Digite o conteúdo para o CT120" />
+                disabled={enviando} rows={5} wrap="off"
+                style={{ whiteSpace: 'pre', overflowWrap: 'normal', overflowX: 'auto' }}
+                placeholder="Digite o conteúdo para o CT120" />
               {painel==='texto' && <button className="btn btn-full" disabled={enviando} onClick={()=>setEfeito('normal')}>EFEITOS DE TEXTO</button>}
               <div className="edit-actions"><button className="btn" onClick={async()=>{try{await navigator.clipboard.writeText(texto)}catch{setRetorno('Não foi possível copiar.')}}}>Copiar</button><button className="btn" disabled={enviando} onClick={async()=>{try{setTexto(await navigator.clipboard.readText())}catch{setRetorno('Use a opção Colar do teclado.')}}}>Colar</button><button className="btn" disabled={enviando} onClick={()=>setTexto('')}>Remover</button><button className="btn" onClick={()=>setPainel('area')}>Voltar</button></div>
             </div>
