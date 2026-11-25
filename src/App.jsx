@@ -140,6 +140,7 @@ function App() {
       setImagemNome('')
       setPreview('')
     }
+    setPainel(tipo === 'variable' ? 'variaveis' : tipo === 'text' ? 'texto' : 'imagens')
     setProgresso(0)
     setRetorno(`✓ Trabalho aberto: ${trabalho.nome || 'Trabalho'}`)
   }
@@ -1175,7 +1176,12 @@ function App() {
             <h2>REVISAR TEXTO · {qr.linhas} {qr.linhas===1?'LINHA':'LINHAS'}</h2>
             <textarea aria-label="Texto para impressão" rows={4} wrap="off" value={qr.texto} onChange={e=>setQr({...qr,texto:e.target.value})}/>
             <button className="btn" onClick={()=>setQr(null)}>MANTER ORIGINAL</button>
-            <button className="btn" onClick={()=>{setTexto(qr.texto);setQr(null)}}>USAR NO EDITOR</button>
+            <button className="btn" onClick={() => {
+              setTexto(qr.texto)
+              setModo('text')
+              setPainel('texto')
+              setQr(null)
+            }}>USAR NO EDITOR</button>
           </>}
         </section>
       </div>}
