@@ -41,6 +41,8 @@ function App() {
   const [etapaVariavel, setEtapaVariavel] = useState({ tipo: 'menu' })
   const [enviando, setEnviando] = useState(false)
   const [progresso, setProgresso] = useState(0)
+  const [origemEfeito, setOrigemEfeito] = useState(null)
+  const [imagemParaEditar, setImagemParaEditar] = useState(null)
   const [imagemNome, setImagemNome] = useState('')
   const [imagemBase64, setImagemBase64] = useState('')
   const [preview, setPreview] = useState('')
@@ -86,6 +88,7 @@ function App() {
       salvoEm: new Date().toISOString()
     }
     if (modo === 'image') {
+      if (origemEfeito) trabalho.origemEfeito = origemEfeito
       trabalho.imagemBase64 = imagemBase64
       trabalho.imagemNome = imagemNome || `${nome}.bmp`
     }
@@ -129,6 +132,7 @@ function App() {
     setNomeTrabalho(trabalho.nome || 'Trabalho')
     setTrabalhoSelecionado(trabalho.nome || '')
     setModo(tipo)
+    setOrigemEfeito(tipo === 'image' && typeof trabalho.origemEfeito?.texto === 'string' ? trabalho.origemEfeito : null)
     setTexto(tipo === 'image' ? '' : (trabalho.texto || ''))
     if (tipo === 'image') {
       const b64 = trabalho.imagemBase64 || ''
@@ -759,6 +763,7 @@ function App() {
   }
 
   function mostrarBmpCatalogo(nome, base64, codigo = '') {
+    setOrigemEfeito(null)
     validarBmpBase64(base64)
     setModo('image')
     setImagemNome(nome)
@@ -769,6 +774,7 @@ function App() {
   }
 
   function limparBmpDaPrevia() {
+    setOrigemEfeito(null)
     setCodigoDaPrevia('')
     setImagemNome('')
     setImagemBase64('')
@@ -906,6 +912,7 @@ function App() {
   const conectado = status.startsWith('CT120 CONECTADO')
 
   function limparConteudo() {
+    setOrigemEfeito(null)
     setCodigoDaPrevia('')
     setTexto('')
     setImagemNome('')
@@ -1000,6 +1007,7 @@ function App() {
   function aplicarEfeito() {
     if (!effectFits || !effectCanvas.current) return
     bitmapIndustrial(effectCanvas.current, 'texto-efeito.bmp')
+    setOrigemEfeito({ texto, efeito, fonteEfeito, boldE, italicE, sizeE, strokeE, marginE })
     setEfeito('')
   }
 
@@ -1025,6 +1033,21 @@ function App() {
         <section className="work-area">
           <h2>ÁREA DE TRABALHO</h2>
           <div className="work-preview">{modo === 'image' ? (preview ? <img src={preview} alt="Prévia" /> : 'Selecione uma imagem') : (texto || 'Novo trabalho • Digite um texto ou gere um código')}</div>
+          {modo === 'image' && preview && <button className="btn btn-full" disabled={enviando} onClick={() => {
+            if (origemEfeito) {
+              setTexto(origemEfeito.texto)
+              setFonteEfeito(origemEfeito.fonteEfeito)
+              setBoldE(origemEfeito.boldE)
+              setItalicE(origemEfeito.italicE)
+              setSizeE(origemEfeito.sizeE)
+              setStrokeE(origemEfeito.strokeE)
+              setMarginE(origemEfeito.marginE)
+              setEfeito(origemEfeito.efeito)
+            } else {
+              setImagemParaEditar({ preview, nome: imagemNome })
+              setPainel('imagens')
+            }
+          }}>{origemEfeito ? 'EDITAR TEXTO' : 'EDITAR IMAGEM'}</button>}
         </section>
         {['texto','variaveis','icones'].includes(painel) && (        <section className="content-section">
           <h2>{painel.toUpperCase()}</h2>
@@ -1099,7 +1122,8 @@ function App() {
         {painel==='imagens' && <section className="content-section">
           <input ref={bmpCatalogoRef} type="file" accept=".bmp,image/bmp,image/x-ms-bmp"
             disabled={enviando} onChange={selecionarBmpCatalogo} hidden/>
-          <EditorImagem onBitmap={bitmapIndustrial} encodeBitmap={encodeIndustrialBmp}
+          <EditorImagem imagemParaEditar={imagemParaEditar} onEditStart={() => setImagemParaEditar(null)}
+            onBitmap={bitmapIndustrial} encodeBitmap={encodeIndustrialBmp}
             onSelectBmp={()=>bmpCatalogoRef.current?.click()} preview={preview} disabled={enviando}/>
         </section>}
         {painel==='icones' && <section><h2>ÍCONES</h2><p>Biblioteca de impressão será incorporada na próxima etapa.</p></section>}

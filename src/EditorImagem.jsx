@@ -1,10 +1,23 @@
 import {Capacitor, registerPlugin} from '@capacitor/core';
-import {useRef,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 const Filesystem=registerPlugin('Filesystem');
 const Share=registerPlugin('Share');
 
-export default function EditorImagem({onBitmap,encodeBitmap,onSelectBmp,preview,disabled}){
+export default function EditorImagem({onBitmap,encodeBitmap,onSelectBmp,preview,disabled,imagemParaEditar,onEditStart}){
 const source=useRef(null), loadId=useRef(0), ref=useRef(null), original=useRef(null), history=useRef([]), future=useRef([]), drawing=useRef(false);const [open,S]=useState(false),[status,T]=useState(''),[pen,P]=useState(false),[size,Z]=useState(3),[zoom,Q]=useState(1),[mode,M]=useState('normal'),[brightness,B]=useState(0),[contrast,C]=useState(0),[sharp,H]=useState(0);
+const [manual,setManual]=useState(false);
+const [manualTool,setManualTool]=useState('lapis');
+const [navigating,setNavigating]=useState(false);
+const shapeStart=useRef(null);
+const editRequest=useRef(null);
+const [bitmapName,setBitmapName]=useState('');
+useEffect(()=>{
+  if(!imagemParaEditar||editRequest.current===imagemParaEditar)return;
+  editRequest.current=imagemParaEditar;
+  decode(imagemParaEditar.preview,undefined,true,imagemParaEditar.nome);
+  onEditStart();
+});
+
 const [tools,showTools]=useState(false),[favorites,showFavorites]=useState(false),[error,setError]=useState('');
 const [crop,K]=useState(false),[fill,F]=useState(false),[erase,E]=useState(false),[compare,V]=useState(false),[fav,U]=useState(()=>{try{return JSON.parse(localStorage.getItem("ctdestroyer-favoritos")||"[]")}catch{return []}});const start=useRef(null);
 const ctx=()=>ref.current.getContext('2d',{willReadFrequently:true});const snap=()=>ctx().getImageData(0,0,ref.current.width,ref.current.height);function put(d){ref.current.width=d.width;ref.current.height=d.height;ctx().putImageData(d,0,0);report()}function report(){const d=snap();let n=0;for(let i=0;i<d.data.length;i+=4)if(d.data[i]<128)n++;T(`${d.width} × ${d.height} px • Preto: ${(100*n/(d.width*d.height)).toFixed(1)}%`)}function commitPreview(image){source.current=image;M("normal");B(0);C(0);H(0)}
@@ -13,7 +26,7 @@ function restore(state){source.current=state.source;M(state.mode);B(state.bright
 function save(){history.current.push(capture());if(history.current.length>20)history.current.shift();future.current=[]}
 function undo(){if(history.current.length){future.current.push(capture());restore(history.current.pop())}}
 function redo(){if(future.current.length){history.current.push(capture());restore(future.current.pop())}}
-function init(img, draw=false){
+function init(img, draw=false, name=''){
   const c=ref.current;
   const scale=img?Math.min(480/img.width,240/img.height,1):1;
   c.width=img?Math.max(1,Math.round(img.width*scale)):480;
@@ -28,16 +41,17 @@ function init(img, draw=false){
   drawing.current=false;
   start.current=null;
   M('normal'); B(0); C(0); H(0); Q(1);
+  setBitmapName(name); setManual(draw); setManualTool('lapis'); setNavigating(false); shapeStart.current=null; Z(3);
   P(draw); K(false); F(false); E(false); V(false); showTools(false);
   setError('');
   filter('normal',0,0,0);
   S(true);
 }
-function decode(url,release=()=>{}){
+function decode(url,release=()=>{},draw=false,name=''){
   const id=++loadId.current;
   const image=new Image();
   image.onload=()=>{
-    try{if(id===loadId.current&&ref.current)init(image);}
+    try{if(id===loadId.current&&ref.current)init(image,draw,name);}
     catch{setError('Não foi possível preparar a imagem.');}
     finally{release();}
   };
@@ -56,7 +70,7 @@ function load(e){
   }
 }
 async function exportBitmap(){
-  const answer=prompt('Nome do arquivo BMP','imagem_convertida.bmp');
+  const answer=prompt('Nome do arquivo BMP',(bitmapName || (manual?'desenho.bmp':'imagem_convertida.bmp')));
   if(answer===null)return;
   const stem=answer.trim().replace(/\.bmp$/i,'').replace(/[\\/:*?"<>|]/g,'_').trim();
   if(!stem){setError('Informe um nome para o arquivo.');return;}
@@ -97,6 +111,25 @@ function removeFav(i){try{const next=fav.filter((_,j)=>j!==i);localStorage.setIt
 function openFav(f){decode(f.url)}
 function originalUrl(){if(!original.current)return '';const c=document.createElement('canvas');c.width=original.current.width;c.height=original.current.height;c.getContext('2d').putImageData(original.current,0,0);return c.toDataURL()}
 function point(e){const c=ref.current,r=c.getBoundingClientRect();return [(e.clientX-r.left)*c.width/r.width,(e.clientY-r.top)*c.height/r.height]}
+function drawShape(end) {
+  const [x,y]=shapeStart.current;
+  const [endX,endY]=end;
+  const width=endX-x, height=endY-y;
+  const c=ctx();
+  save();
+  c.strokeStyle='black';
+  c.fillStyle='black';
+  c.lineWidth=size;
+  if(manualTool==='filled') c.fillRect(x,y,width,height);
+  else if(manualTool==='rectangle') c.strokeRect(x,y,width,height);
+  else {
+    c.beginPath();
+    if(manualTool==='circle') c.arc(x,y,Math.hypot(width,height),0,2*Math.PI);
+    else {c.moveTo(x,y);c.lineTo(endX,endY);}
+    c.stroke();
+  }
+  commitPreview(snap());
+}
 const modes=[['normal','Normal'],['tracado','Traçado'],['negativo','Invertido'],['reticula fina','Retícula fina'],['reticula media','Retícula média'],['reticula grossa','Retícula grossa'],['floyd','Floyd-Steinberg'],['engrossar','Engrossar'],['afinar','Afinar'],['suavizar','Suavizar'],['ruido','Reduzir ruído']];
 return <div className="ct-image-panel">
   <button className="btn btn-full" disabled={disabled} onClick={onSelectBmp}>SELECIONAR IMAGEM BMP</button>
@@ -107,13 +140,35 @@ return <div className="ct-image-panel">
   {preview&&<img className="ct-image-result" src={preview} alt="Imagem tratada"/>}
   {!open&&error&&<p role="alert">{error}</p>}
   <div className="modal-overlay ct-image-overlay" hidden={!open}>
-  <div className="ct-image-editor" role="dialog" aria-modal="true" aria-label="Tratamento de imagem">
-  <h3>TRATAMENTO DE IMAGEM</h3>
-  <select aria-label="Efeito" value={mode} onChange={e=>{save(); M(e.target.value);filter(e.target.value,brightness,contrast,sharp)}}>{modes.map(([v,n])=><option key={v} value={v}>{n}</option>)}</select>
-  <div style={{overflow:'auto',background:'#eee',padding:4}}>
-<canvas ref={ref} style={{width:`${zoom*100}%`,height:'auto',imageRendering:'pixelated',touchAction:pen||crop||fill?'none':'auto'}} onPointerDown={e=>{if(crop){start.current=point(e);e.currentTarget.setPointerCapture(e.pointerId);return}if(fill){flood(...point(e));commitPreview(snap());return}if(!pen)return;save();drawing.current=true;e.currentTarget.setPointerCapture(e.pointerId);const [x,y]=point(e);ctx().fillStyle=erase?'white':'black';ctx().fillRect(x-size/2,y-size/2,size,size);ctx().beginPath();ctx().moveTo(x,y)}} onPointerMove={e=>{if(!drawing.current)return;const [x,y]=point(e);const c=ctx();c.strokeStyle=erase?'white':'black';c.lineWidth=size;c.lineCap='round';c.lineTo(x,y);c.stroke();c.beginPath();c.moveTo(x,y)}} onPointerUp={e=>{let cropped=false;if(crop&&start.current){const [x,y]=start.current,[xx,yy]=point(e),c=ref.current;const l=Math.max(0,Math.floor(Math.min(x,xx))),t=Math.max(0,Math.floor(Math.min(y,yy))),r=Math.min(c.width,Math.ceil(Math.max(x,xx))),b=Math.min(c.height,Math.ceil(Math.max(y,yy)));if(r>l&&b>t){save();put(ctx().getImageData(l,t,r-l,b-t));cropped=true}start.current=null;K(false)}if(drawing.current||cropped)commitPreview(snap());drawing.current=false;report()}} onPointerCancel={()=>{if(drawing.current)commitPreview(snap());drawing.current=false;report()}}/></div><p className="ct-image-stats">{status}</p>
+  <div className="ct-image-editor" style={manual?{overflowY:'auto'}:undefined} role="dialog" aria-modal="true" aria-label={manual?"Editor manual":"Tratamento de imagem"}>
+  <h3>{manual?"EDITOR MANUAL":"TRATAMENTO DE IMAGEM"}</h3>
+  {!manual&&<select aria-label="Efeito" value={mode} onChange={e=>{save(); M(e.target.value);filter(e.target.value,brightness,contrast,sharp)}}>{modes.map(([v,n])=><option key={v} value={v}>{n}</option>)}</select>}
+  {manual&&<div className="ct-image-options" style={{flex:'0 0 auto',overflow:'visible'}}>
+    <label>Ferramenta
+      <select value={manualTool} onChange={event=>{setManualTool(event.target.value);E(event.target.value==='borracha')}}>
+        <option value="lapis">Lápis</option>
+        <option value="borracha">Borracha</option>
+        <option value="line">Linha</option>
+        <option value="rectangle">Retângulo</option>
+        <option value="circle">Círculo</option>
+        <option value="filled">Retângulo preenchido</option>
+      </select>
+    </label>
+    <label>Zoom: {zoom}×<input type="range" min={1} max={8} value={zoom} onChange={event=>Q(+event.target.value)}/></label>
+    <label><input type="checkbox" checked={navigating} onChange={event=>setNavigating(event.target.checked)}/> Navegar pela imagem</label>
+    <label>Espessura: {size} px<input type="range" min={1} max={20} value={size} onChange={event=>Z(+event.target.value)}/></label>
+  </div>}
+  <div style={{overflow:'auto',background:'#eee',padding:4,...(manual?{maxHeight:'36dvh',flex:'0 0 auto'}:{})}}>
+<canvas ref={ref} style={{width:`${zoom*100}%`,height:'auto',maxHeight:manual?'none':undefined,imageRendering:'pixelated',touchAction:!navigating&&(pen||crop||fill)?'none':'auto'}} onPointerDown={e=>{
+  if(manual&&navigating)return;
+  if(manual&&manualTool!=='lapis'&&manualTool!=='borracha'){
+    shapeStart.current=point(e);
+    e.currentTarget.setPointerCapture(e.pointerId);
+    return;
+  }
+  if(crop){start.current=point(e);e.currentTarget.setPointerCapture(e.pointerId);return}if(fill){flood(...point(e));commitPreview(snap());return}if(!pen)return;save();drawing.current=true;e.currentTarget.setPointerCapture(e.pointerId);const [x,y]=point(e);ctx().fillStyle=erase?'white':'black';ctx().fillRect(x-size/2,y-size/2,size,size);ctx().beginPath();ctx().moveTo(x,y)}} onPointerMove={e=>{if(!drawing.current)return;const [x,y]=point(e);const c=ctx();c.strokeStyle=erase?'white':'black';c.lineWidth=size;c.lineCap='round';c.lineTo(x,y);c.stroke();c.beginPath();c.moveTo(x,y)}} onPointerUp={e=>{if(shapeStart.current){drawShape(point(e));shapeStart.current=null;report();return}let cropped=false;if(crop&&start.current){const [x,y]=start.current,[xx,yy]=point(e),c=ref.current;const l=Math.max(0,Math.floor(Math.min(x,xx))),t=Math.max(0,Math.floor(Math.min(y,yy))),r=Math.min(c.width,Math.ceil(Math.max(x,xx))),b=Math.min(c.height,Math.ceil(Math.max(y,yy)));if(r>l&&b>t){save();put(ctx().getImageData(l,t,r-l,b-t));cropped=true}start.current=null;K(false)}if(drawing.current||cropped)commitPreview(snap());drawing.current=false;report()}} onPointerCancel={()=>{shapeStart.current=null;if(drawing.current)commitPreview(snap());drawing.current=false;report()}}/></div><p className="ct-image-stats">{status}</p>
   <div className="edit-actions"><button className="btn" onClick={undo}>DESFAZER</button><button className="btn" onClick={redo}>REFAZER</button></div>
-  <div className="ct-image-options">
+  {!manual&&<div className="ct-image-options">
   {compare&&<div><p>Original</p><img src={originalUrl()} style={{maxWidth:'100%'}} alt="Original"/></div>}
   {[
     ['Brilho',brightness,B,-100,100,v=>filter(mode,v,contrast,sharp)],
@@ -133,11 +188,13 @@ return <div className="ct-image-panel">
       ['USAR NA ÁREA DE TRABALHO',()=>{onBitmap(ref.current,'imagem_convertida.bmp');S(false)}]
     ].map(([n,f])=><button key={n} className="btn" onClick={()=>{const before=snap();f();const after=snap();if(n!=='ORIGINAL'&&(before.width!==after.width||before.height!==after.height||before.data.some((pixel,i)=>pixel!==after.data[i])))commitPreview(after)}}>{n}</button>)}</div>
   </>}
-  </div>
+  </div>}
   {error&&<p role="alert">{error}</p>}
   <footer className="ct-image-footer">
-    <button className="btn" onClick={()=>showTools(!tools)} aria-expanded={tools}>FERRAMENTAS</button>
-    <button className="btn" disabled={disabled} onClick={exportBitmap}>CONVERTER E SALVAR</button>
+    {manual
+      ? <button className="btn" disabled={disabled} onClick={()=>{onBitmap(ref.current,bitmapName||'desenho.bmp');S(false)}}>APLICAR</button>
+      : <button className="btn" onClick={()=>showTools(!tools)} aria-expanded={tools}>FERRAMENTAS</button>}
+    <button className="btn" disabled={disabled} onClick={exportBitmap}>{manual?"SALVAR BMP":"CONVERTER E SALVAR"}</button>
     <button className="btn" onClick={()=>{setError('');S(false)}}>FECHAR</button>
   </footer>
   </div></div></div>
