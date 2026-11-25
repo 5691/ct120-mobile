@@ -1,7 +1,7 @@
-import {Capacitor, registerPlugin} from '@capacitor/core';
+import {Capacitor} from '@capacitor/core';
+import {Directory, Filesystem} from '@capacitor/filesystem';
+import {Share} from '@capacitor/share';
 import {useEffect,useRef,useState} from 'react';
-const Filesystem=registerPlugin('Filesystem');
-const Share=registerPlugin('Share');
 
 export default function EditorImagem({onBitmap,encodeBitmap,onSelectBmp,preview,disabled,imagemParaEditar,onEditStart}){
 const source=useRef(null), loadId=useRef(0), ref=useRef(null), original=useRef(null), history=useRef([]), future=useRef([]), drawing=useRef(false);const [open,S]=useState(false),[status,T]=useState(''),[pen,P]=useState(false),[size,Z]=useState(3),[zoom,Q]=useState(1),[mode,M]=useState('normal'),[brightness,B]=useState(0),[contrast,C]=useState(0),[sharp,H]=useState(0);
@@ -82,7 +82,7 @@ async function exportBitmap(){
     const file=new File([bytes],name,{type:'image/bmp'});
     if(Capacitor.isNativePlatform()){
       const data=btoa(Array.from(bytes,byte=>String.fromCharCode(byte)).join(''));
-      const {uri}=await Filesystem.writeFile({path:name,data,directory:'CACHE'});
+      const {uri}=await Filesystem.writeFile({path:name,data,directory:Directory.Cache});
       await Share.share({files:[uri]});
     }else if(navigator.canShare?.({files:[file]})){
       await navigator.share({files:[file]});
