@@ -1,3 +1,4 @@
+import { organizarLeitura } from './organizarLeitura.mjs'
 import EditorImagem from './EditorImagem.jsx'
 import {Icones} from './Codigos.jsx'
 import GeradorCodigos from './GeradorCodigos.jsx'
@@ -21,6 +22,10 @@ const iconPaths = {"save": "M4 3h14l3 3v15H3V3h1 M7 3v7h10V3 M7 21v-8h10v8", "fo
 function Icon({name}) { return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={iconPaths[name] || iconPaths.grid}/></svg> }
 
 function App() {
+  const [qr, setQr] = useState(null)
+  function revisarQr(n) {
+    setQr({...qr, etapa:'revisar', linhas:n, texto:organizarLeitura(qr.original,n)})
+  }
   useEffect(() => { document.title = "CT 120 Destroyer" }, [])
   const [efeito, setEfeito] = useState("")
   const [fonteEfeito, setFonteEfeito] = useState("Arial")
@@ -1054,7 +1059,12 @@ function App() {
               setLendoCodigo(true)
               try {
                 const leitura=await CapacitorBarcodeScanner.scanBarcode({hint:CapacitorBarcodeScannerTypeHint.ALL,scanInstructions:'Aponte a câmera para um código de barras ou 2D'})
-                if(leitura?.ScanResult){setTexto(leitura.ScanResult);setModo('text');setPainel('texto')}
+                if (leitura?.ScanResult) {
+                  setTexto(leitura.ScanResult)
+                  setModo('text')
+                  setPainel('texto')
+                  setQr({etapa:'original', original:leitura.ScanResult})
+                }
               } catch(error) {if(!/cancel/i.test(String(error.message||error)))setRetorno(String(error.message||error))}
               finally {setLendoCodigo(false)}
             }}>Leitor</button>
@@ -1145,6 +1155,28 @@ function App() {
         {painel!=='mais' && <div className="result-box" role="status">{retorno}</div>}
       </main>
 
+      {qr && <div className="modal-overlay">
+        <section className="variable-modal" role="dialog" aria-modal="true" aria-label="Leitura universal" style={{padding:16,maxHeight:'80dvh',overflowY:'auto',gap:8}}>
+          {qr.etapa === 'original' && <>
+            <h2>LEITURA UNIVERSAL</h2><p>Conteúdo original</p>
+            <pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'32dvh',overflowY:'auto'}}>{qr.original}</pre>
+            <p>Deseja organizar para impressão?</p>
+            <button className="btn" onClick={()=>setQr(null)}>MANTER ORIGINAL</button>
+            <button className="btn" onClick={()=>setQr({...qr,etapa:'linhas'})}>ORGANIZAR</button>
+          </>}
+          {qr.etapa === 'linhas' && <>
+            <h2>ORGANIZAR PARA IMPRESSÃO</h2>
+            {[1,2,3].map(n=><button className="btn" key={n} onClick={()=>revisarQr(n)}>{n} {n===1?'linha':'linhas'}</button>)}
+            <button className="btn" onClick={()=>setQr(null)}>CANCELAR</button>
+          </>}
+          {qr.etapa === 'revisar' && <>
+            <h2>REVISAR TEXTO · {qr.linhas} {qr.linhas===1?'LINHA':'LINHAS'}</h2>
+            <textarea aria-label="Texto para impressão" rows={4} wrap="off" value={qr.texto} onChange={e=>setQr({...qr,texto:e.target.value})}/>
+            <button className="btn" onClick={()=>setQr(null)}>MANTER ORIGINAL</button>
+            <button className="btn" onClick={()=>{setTexto(qr.texto);setQr(null)}}>USAR NO EDITOR</button>
+          </>}
+        </section>
+      </div>}
       {efeito && <div className="modal-overlay"><div className="variable-modal effect-modal"><h2>EFEITOS DE TEXTO</h2><textarea value={texto} onChange={e=>setTexto(e.target.value)}/><select value={efeito} onChange={e=>setEfeito(e.target.value)}><option value="negativo">Negativo</option><option value="vazado">Vazado</option><option value="normal">Normal (imagem)</option></select><select value={fonteEfeito} onChange={e=>setFonteEfeito(e.target.value)}>{[['Arial','Sem serifa'],['Arial Black','Grossa'],['Georgia','Clássica serifada'],['Courier New','Máquina de escrever'],['Arial Narrow','Condensada'],['cursive','Manuscrita'],['sans-serif','Casual'],...fonts.map(f=>[f.name,f.label])].map(([v,n])=><option key={v} value={v}>{n}</option>)}</select><label className="btn btn-full">IMPORTAR FONTE TTF / OTF<input type="file" accept=".ttf,.otf" style={{display:'none'}} onChange={importFont}/></label><label><input type="checkbox" checked={boldE} onChange={e=>setBoldE(e.target.checked)}/> Negrito</label><label><input type="checkbox" checked={italicE} onChange={e=>setItalicE(e.target.checked)}/> Itálico</label>{[['Tamanho da letra',sizeE,setSizeE,8,160],['Espessura do contorno',strokeE,setStrokeE,1,10],['Margem',marginE,setMarginE,0,24]].map(([n,v,f,min,max])=><label key={n}>{n}: {v} px<input type="range" min={min} max={max} value={v} onChange={e=>f(+e.target.value)}/></label>)}<div style={{display:'flex',justifyContent:'center',background:'#eee',padding:6}}>
         <canvas ref={effectCanvas} aria-label="Prévia do efeito de texto" hidden={!effectFits}
           style={{maxWidth:'100%',maxHeight:'32dvh',objectFit:'contain',imageRendering:'pixelated'}}/>
