@@ -6,6 +6,9 @@ import {useEffect,useRef,useState} from 'react';
 export default function EditorImagem({onBitmap,encodeBitmap,onSelectBmp,preview,disabled,imagemParaEditar,onEditStart}){
 const source=useRef(null), loadId=useRef(0), ref=useRef(null), original=useRef(null), history=useRef([]), future=useRef([]), drawing=useRef(false);const [open,S]=useState(false),[status,T]=useState(''),[pen,P]=useState(false),[size,Z]=useState(3),[zoom,Q]=useState(1),[mode,M]=useState('normal'),[brightness,B]=useState(0),[contrast,C]=useState(0),[sharp,H]=useState(0);
 const [manual,setManual]=useState(false);
+const [savedBmp,setSavedBmp]=useState(null);
+const [savingBmp,setSavingBmp]=useState(false);
+const savingBmpRef=useRef(false);
 const [manualTool,setManualTool]=useState('lapis');
 const [navigating,setNavigating]=useState(false);
 const shapeStart=useRef(null);
@@ -70,16 +73,35 @@ function load(e){
   }
 }
 async function exportBitmap(){
+  if(savingBmpRef.current)return;
   const answer=prompt('Nome do arquivo BMP',(bitmapName || (manual?'desenho.bmp':'imagem_convertida.bmp')));
   if(answer===null)return;
   const stem=answer.trim().replace(/\.bmp$/i,'').replace(/[\\/:*?"<>|]/g,'_').trim();
   if(!stem){setError('Informe um nome para o arquivo.');return;}
   const name=stem+'.bmp';
   setError('');
+  savingBmpRef.current=true;
+  setSavingBmp(true);
   const canvas=ref.current;
   try{
     const bytes=encodeBitmap(canvas);
     const file=new File([bytes],name,{type:'image/bmp'});
+    if(Capacitor.getPlatform()==='ios'){
+      const savedCanvas=document.createElement('canvas');
+      savedCanvas.width=canvas.width;
+      savedCanvas.height=canvas.height;
+      savedCanvas.getContext('2d').drawImage(canvas,0,0);
+      const data=btoa(Array.from(bytes,byte=>String.fromCharCode(byte)).join(''));
+      await Filesystem.writeFile({
+        path:'Imagens/'+name,
+        data,
+        directory:Directory.Documents,
+        recursive:true
+      });
+      setSavedBmp({name, canvas:savedCanvas, url:savedCanvas.toDataURL()});
+      S(false);
+      return;
+    }
     if(Capacitor.isNativePlatform()){
       const data=btoa(Array.from(bytes,byte=>String.fromCharCode(byte)).join(''));
       const {uri}=await Filesystem.writeFile({path:name,data,directory:Directory.Cache});
@@ -97,6 +119,9 @@ async function exportBitmap(){
     S(false);
   }catch(err){
     if(err.name!=='AbortError')setError('Não foi possível exportar o BMP. '+(err.message||''));
+  }finally{
+    savingBmpRef.current=false;
+    setSavingBmp(false);
   }
 }
 function filter(mode,brightness,contrast,sharp){const src=source.current;const d=new ImageData(new Uint8ClampedArray(src.data),src.width,src.height),w=d.width,h=d.height,a=d.data,g=new Float32Array(w*h),cl=v=>Math.max(0,Math.min(255,v));for(let i=0;i<g.length;i++)g[i]=cl((.299*a[i*4]+.587*a[i*4+1]+.114*a[i*4+2]-128)*(1+contrast/100)+128+brightness);const at=(x,y)=>g[Math.max(0,Math.min(h-1,y))*w+Math.max(0,Math.min(w-1,x))];const bayer=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];for(let y=0;y<h;y++)for(let x=0;x<w;x++){let i=y*w+x,v=g[i];if(sharp)v=cl(v+sharp/100*(4*v-at(x-1,y)-at(x+1,y)-at(x,y-1)-at(x,y+1)));if(mode==='tracado')v=Math.hypot(at(x+1,y)-at(x-1,y),at(x,y+1)-at(x,y-1))>35?0:255;else if(mode==='negativo')v=255-v;else if(mode.startsWith('reticula')){let s=mode==='reticula grossa'?3:mode==='reticula media'?2:1;v=v>(bayer[(Math.floor(y/s)%4)*4+Math.floor(x/s)%4]+.5)*16?255:0}else if(mode==='floyd'){let q=v>=128?255:0,err=v-q;v=q;for(const [dx,dy,k] of [[1,0,7],[-1,1,3],[0,1,5],[1,1,1]])if(x+dx>=0&&x+dx<w&&y+dy<h)g[(y+dy)*w+x+dx]+=err*k/16}else if(['engrossar','afinar','suavizar','ruido'].includes(mode)){let ns=[];for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)ns.push(at(x+dx,y+dy));v=mode==='engrossar'?Math.min(...ns):mode==='afinar'?Math.max(...ns):mode==='ruido'?ns.sort((a,b)=>a-b)[4]:ns.reduce((a,b)=>a+b,0)/9}v=v>=128?255:0;a[i*4]=a[i*4+1]=a[i*4+2]=v;a[i*4+3]=255}put(d)}
@@ -137,7 +162,14 @@ return <div className="ct-image-panel">
   <button className="btn btn-full" onClick={()=>showFavorites(!favorites)} aria-expanded={favorites}>FAVORITOS</button>
   {favorites&&<div>{!fav.length&&<p>Nenhum favorito salvo.</p>}{fav.map((f,i)=><div key={i} className="edit-actions"><button className="btn" onClick={()=>openFav(f)}>{f.name}</button><button className="btn" onClick={()=>removeFav(i)}>Excluir</button></div>)}</div>}
   <button className="btn btn-full" disabled={disabled} onClick={()=>{++loadId.current;init(null,true)}}>CRIAR DESENHO</button>
-  {preview&&<img className="ct-image-result" src={preview} alt="Imagem tratada"/>}
+  {savedBmp ? <>
+    <img className="ct-image-result" src={savedBmp.url} alt="Prévia do BMP salvo"/>
+    <p role="status">BMP salvo: {savedBmp.name}<br/>Arquivos · No Meu iPhone · Lucenaart CT120 · Imagens</p>
+    <button className="btn btn-full" disabled={disabled} onClick={()=>{
+      onBitmap(savedBmp.canvas,savedBmp.name);
+      setSavedBmp(null);
+    }}>USAR NA ÁREA DE TRABALHO</button>
+  </> : preview&&<img className="ct-image-result" src={preview} alt="Imagem tratada"/>}
   {!open&&error&&<p role="alert">{error}</p>}
   <div className="modal-overlay ct-image-overlay" hidden={!open}>
   <div className="ct-image-editor" style={manual?{overflowY:'auto'}:undefined} role="dialog" aria-modal="true" aria-label={manual?"Editor manual":"Tratamento de imagem"}>
@@ -184,18 +216,21 @@ return <div className="ct-image-panel">
       ['RECORTAR',()=>{K(!crop);P(false);F(false);T('Arraste sobre a região desejada')}],
       [fill?'PARAR PREENCHIMENTO':'PREENCHER',()=>{F(!fill);K(false);P(false)}],
       ['BORRACHA',()=>{E(true);P(true);K(false);F(false)}],
-      ['REMOVER FUNDO CLARO',background],['COMPARAR',()=>V(!compare)],['SALVAR NOS FAVORITOS',favorite],
-      ['USAR NA ÁREA DE TRABALHO',()=>{onBitmap(ref.current,'imagem_convertida.bmp');S(false)}]
+      ['REMOVER FUNDO CLARO',background],['COMPARAR',()=>V(!compare)],['SALVAR NOS FAVORITOS',favorite]
     ].map(([n,f])=><button key={n} className="btn" onClick={()=>{const before=snap();f();const after=snap();if(n!=='ORIGINAL'&&(before.width!==after.width||before.height!==after.height||before.data.some((pixel,i)=>pixel!==after.data[i])))commitPreview(after)}}>{n}</button>)}</div>
   </>}
   </div>}
   {error&&<p role="alert">{error}</p>}
+  {!manual&&<button className="btn btn-full" disabled={disabled||savingBmp} onClick={()=>{
+    onBitmap(ref.current,'imagem_convertida.bmp');
+    S(false);
+  }}>USAR NA ÁREA DE TRABALHO</button>}
   <footer className="ct-image-footer">
     {manual
-      ? <button className="btn" disabled={disabled} onClick={()=>{onBitmap(ref.current,bitmapName||'desenho.bmp');S(false)}}>APLICAR</button>
+      ? <button className="btn" disabled={disabled||savingBmp} onClick={()=>{onBitmap(ref.current,bitmapName||'desenho.bmp');S(false)}}>APLICAR</button>
       : <button className="btn" onClick={()=>showTools(!tools)} aria-expanded={tools}>FERRAMENTAS</button>}
-    <button className="btn" disabled={disabled} onClick={exportBitmap}>{manual?"SALVAR BMP":"CONVERTER E SALVAR"}</button>
-    <button className="btn" onClick={()=>{setError('');S(false)}}>FECHAR</button>
+    <button className="btn" disabled={disabled||savingBmp} onClick={exportBitmap}>{manual?"SALVAR BMP":"CONVERTER E SALVAR"}</button>
+    <button className="btn" disabled={savingBmp} onClick={()=>{setError('');S(false)}}>FECHAR</button>
   </footer>
   </div></div></div>
 }
