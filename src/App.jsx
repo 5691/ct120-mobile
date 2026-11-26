@@ -1527,6 +1527,7 @@ function App() {
               alt="Prévia do BMP selecionado" style={{maxWidth:'100%',maxHeight:'45vh',objectFit:'contain'}} />
             <button className="btn btn-full" disabled={enviando} onClick={usarBmpPendente}>USAR NA ÁREA DE TRABALHO</button>
             <button className="btn btn-full" onClick={()=>setBmpPendente(null)}>FECHAR</button>
+            <footer className="ct-credit">Desenvolvido por Cássio Lucena • CEO Lucenaart</footer>
           </div></div>}
           <EditorImagem imagemParaEditar={imagemParaEditar} onEditStart={() => setImagemParaEditar(null)}
             onBitmap={bitmapIndustrial} encodeBitmap={encodeIndustrialBmp}
@@ -1583,10 +1584,11 @@ function App() {
             <TesteImpressao onBitmap={bitmapIndustrial} disabled={enviando}/>
             <button className="btn" onClick={()=>setExtraMenu('log')}>DETALHES DO ENVIO</button>
           </div>
-          {extraMenu&&<div className="modal-overlay"><div className="variable-modal effect-modal"><h2>{extraMenu==='links'?'VÍNCULOS SALVOS':'DETALHES DO ENVIO'}</h2>{extraMenu==='links'?<>{Object.entries(carregarCatalogoBmp()).length===0&&<p>Nenhum vínculo salvo.</p>}{Object.entries(carregarCatalogoBmp()).map(([key,r])=><div key={key}><p>{key} → {r.nome}</p><button className="btn" disabled={enviando} onClick={()=>{mostrarBmpCatalogo(r.nome,r.base64,key);setExtraMenu('');setPainel('area')}}>ABRIR</button><button className="btn" disabled={enviando} onClick={()=>{if(window.confirm('Excluir vínculo?')){const c=carregarCatalogoBmp();delete c[key];salvarCatalogoBmp(c);setExtraMenu('');}}}>EXCLUIR</button></div>)}</>:<div className="result-box" style={{whiteSpace:'pre-wrap'}}>{status} · {progresso}%<p>{retorno}</p></div>}<button className="btn btn-full" onClick={()=>setExtraMenu('')}>VOLTAR</button></div></div>}
+          {extraMenu&&<div className="modal-overlay"><div className="variable-modal effect-modal"><h2>{extraMenu==='links'?'VÍNCULOS SALVOS':'DETALHES DO ENVIO'}</h2>{extraMenu==='links'?<>{Object.entries(carregarCatalogoBmp()).length===0&&<p>Nenhum vínculo salvo.</p>}{Object.entries(carregarCatalogoBmp()).map(([key,r])=><div key={key}><p>{key} → {r.nome}</p><button className="btn" disabled={enviando} onClick={()=>{mostrarBmpCatalogo(r.nome,r.base64,key);setExtraMenu('');setPainel('area')}}>ABRIR</button><button className="btn" disabled={enviando} onClick={()=>{if(window.confirm('Excluir vínculo?')){const c=carregarCatalogoBmp();delete c[key];salvarCatalogoBmp(c);setExtraMenu('');}}}>EXCLUIR</button></div>)}</>:<div className="result-box" style={{whiteSpace:'pre-wrap'}}>{status} · {progresso}%<p>{retorno}</p></div>}<button className="btn btn-full" onClick={()=>setExtraMenu('')}>VOLTAR</button><footer className="ct-credit">Desenvolvido por Cássio Lucena • CEO Lucenaart</footer></div></div>}
         </section>)}
         {painel!=='mais' && <div className="result-box" role="status">{retorno}</div>}
       </main>
+      <footer className="ct-credit">Desenvolvido por Cássio Lucena • CEO Lucenaart</footer>
 
       {qr && <div className="modal-overlay">
         <section className="variable-modal" role="dialog" aria-modal="true" aria-label="Leitura universal" style={{padding:16,maxHeight:'80dvh',overflowY:'auto',gap:8}}>
@@ -1613,6 +1615,7 @@ function App() {
               setQr(null)
             }}>USAR NO EDITOR</button>
           </>}
+          <footer className="ct-credit">Desenvolvido por Cássio Lucena • CEO Lucenaart</footer>
         </section>
       </div>}
       {edicaoTexto && <div className="modal-overlay"><div className="variable-modal effect-modal" role="dialog" aria-modal="true" aria-label="Editar texto">
@@ -1642,12 +1645,13 @@ function App() {
           onChange={e=>alterarEstiloTexto('fontStyle',e.target.checked?'italic':'normal')}/> Itálico</label>
         <div className="edit-actions"><button className="btn" onClick={aplicarEdicaoTexto}>APLICAR</button>
           <button className="btn" onClick={()=>setEdicaoTexto(null)}>CANCELAR</button></div>
+        <footer className="ct-credit">Desenvolvido por Cássio Lucena • CEO Lucenaart</footer>
       </div></div>}
       {efeito && <div className="modal-overlay"><div className="variable-modal effect-modal"><h2>EFEITOS DE TEXTO</h2><textarea value={texto} onChange={e=>setTexto(e.target.value)}/><select aria-label="Efeito de texto" style={{ boxSizing: 'border-box', width: '100%', height: 44, minHeight: 44, flexShrink: 0, padding: '0 8px', fontSize: 16, lineHeight: 'normal' }} value={efeito} onChange={e=>setEfeito(e.target.value)}><option value="negativo">Negativo</option><option value="vazado">Vazado</option><option value="normal">Normal — texto preto</option></select><select aria-label="Fonte do texto" style={{ boxSizing: 'border-box', width: '100%', height: 44, minHeight: 44, flexShrink: 0, padding: '0 8px', fontSize: 16, lineHeight: 'normal' }} value={fonteEfeito} onChange={e=>setFonteEfeito(e.target.value)}>{[['Arial','Sem serifa (estilo Arial)'],['Arial Black','Grossa'],['Georgia','Clássica serifada'],['Courier New','Máquina de escrever'],['Arial Narrow','Condensada'],['cursive','Manuscrita'],['sans-serif','Casual'],...fonts.map(f=>[f.name,f.label])].map(([v,n])=><option key={v} value={v}>{n}</option>)}</select><label className="btn btn-full">IMPORTAR FONTE TTF / OTF<input type="file" accept=".ttf,.otf" style={{display:'none'}} onChange={importFont}/></label><label><input type="checkbox" checked={boldE} onChange={e=>setBoldE(e.target.checked)}/> Negrito</label><label><input type="checkbox" checked={italicE} onChange={e=>setItalicE(e.target.checked)}/> Itálico</label>{[['Tamanho da letra',sizeE,setSizeE,8,160],['Espessura do contorno',strokeE,setStrokeE,1,10],['Margem',marginE,setMarginE,0,24]].map(([n,v,f,min,max])=><label key={n}>{n}: {v} px<input type="range" min={min} max={max} value={v} onChange={e=>f(+e.target.value)}/></label>)}<div style={{display:'flex',justifyContent:'center',background:'#eee',padding:6}}>
         <canvas ref={effectCanvas} aria-label="Prévia do efeito de texto" hidden={!effectFits}
           style={{maxWidth:'100%',maxHeight:'32dvh',objectFit:'contain',imageRendering:'pixelated'}}/>
         {!effectFits && <span>{texto.trim() ? 'O texto excede o limite da imagem.' : 'Digite um texto para ver a prévia.'}</span>}
-      </div><div className="edit-actions"><button className="btn" disabled={!effectFits || enviando} onClick={aplicarEfeito}>APLICAR</button><button className="btn" onClick={()=>{if(origemEfeito && imagemBase64)setTexto('');setEfeito('')}}>VOLTAR</button></div></div></div>}
+      </div><div className="edit-actions"><button className="btn" disabled={!effectFits || enviando} onClick={aplicarEfeito}>APLICAR</button><button className="btn" onClick={()=>{if(origemEfeito && imagemBase64)setTexto('');setEfeito('')}}>VOLTAR</button></div><footer className="ct-credit">Desenvolvido por Cássio Lucena • CEO Lucenaart</footer></div></div>}
       {editorAberto && (
         <div className="modal-overlay">
           <div className="variable-modal" ref={dialogoRef} key={etapaVariavel.tipo}
@@ -1692,6 +1696,7 @@ function App() {
                 </>
               )}
             </div>
+            <footer className="ct-credit">Desenvolvido por Cássio Lucena • CEO Lucenaart</footer>
           </div>
         </div>
       )}
