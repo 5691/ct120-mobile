@@ -1,9 +1,10 @@
+import { flushSync } from 'react-dom'
 import { organizarLeitura } from './organizarLeitura.mjs'
 import EditorImagem from './EditorImagem.jsx'
 import {Icones} from './Codigos.jsx'
 import GeradorCodigos from './GeradorCodigos.jsx'
 import TesteImpressao from './TesteImpressao.jsx'
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { BleClient } from '@capacitor-community/bluetooth-le'
 import { CapacitorBarcodeScanner, CapacitorBarcodeScannerTypeHint } from '@capacitor/barcode-scanner'
 import './App.css'
@@ -31,7 +32,7 @@ function App() {
   const [fonteEfeito, setFonteEfeito] = useState("Arial")
   const [boldE,setBoldE]=useState(false),[italicE,setItalicE]=useState(false),[sizeE,setSizeE]=useState(64),[strokeE,setStrokeE]=useState(1),[marginE,setMarginE]=useState(6),[extraMenu,setExtraMenu]=useState(''),[fonts,setFonts]=useState(()=>{try{return JSON.parse(localStorage.getItem('ct-fonts')||'[]')}catch{return []}})
   useEffect(()=>{fonts.forEach(async f=>{try{const face=await new FontFace(f.name,`url(${f.data})`).load();document.fonts.add(face)}catch{}})},[fonts])
-  async function importFont(e){const f=e.target.files?.[0];if(!f)return;try{const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(f)});const name='CTFont'+Date.now();const face=await new FontFace(name,`url(${data})`).load();document.fonts.add(face);const next=[...fonts,{name,label:f.name,data}];localStorage.setItem('ct-fonts',JSON.stringify(next));setFonts(next);setFonteEfeito(name)}catch{setRetorno('Não foi possível importar a fonte.')}e.target.value=''}
+  async function importFont(e, destino = "efeito"){const f=e.target.files?.[0];if(!f)return;try{const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(f)});const name='CTFont'+Date.now();const face=await new FontFace(name,`url(${data})`).load();document.fonts.add(face);const next=[...fonts,{name,label:f.name,data}];localStorage.setItem('ct-fonts',JSON.stringify(next));setFonts(next);if(destino === "editor") setEdicaoTexto(atual=>atual?{...atual,estilo:{...atual.estilo,fontFamily:name}}:atual);else setFonteEfeito(name)}catch{setRetorno('Não foi possível importar a fonte.');if(destino === 'editor') window.alert('Não foi possível importar a fonte.')}e.target.value=''}
   const [status, setStatus] = useState('Desconectado')
   const [texto, setTexto] = useState('')
   const [painel, setPainel] = useState('texto')
@@ -77,17 +78,234 @@ function App() {
     localStorage.setItem('ct120_trabalhos', JSON.stringify(ordenada))
   }
 
+  const [textoAdicional, setTextoAdicional] = useState('')
+  function larguraCampo(valor, minimo) {
+    const comprimento = valor.split('\n').reduce((maior, linha) => Math.max(maior, linha.length), 0)
+    return Math.max(minimo, comprimento + 2) + 'ch'
+  }
+
+  const [ordem, setOrdem] = useState(['texto', 'imagem', 'adicional'])
+  const inicioArraste = useRef(null)
+  const [extras,setExtras] = useState([])
+  const [textosLivres,setTextosLivres] = useState({})
+  const textoLivre = id => id.startsWith('livre-')
+  const cursorIcone = useRef(null)
+  function guardarCursor(id,e) {
+    cursorIcone.current={id,a:e.currentTarget.selectionStart,b:e.currentTarget.selectionEnd}
+  }
+  function inserirSimbolo(v) {
+    const c=cursorIcone.current
+    const id=c?.id
+    const valor=id==='texto'?texto:id==='adicional'?textoAdicional:textosLivres[id]
+    if (c && typeof valor==='string' && ordem.includes(id)) {
+      const novo=valor.slice(0,c.a)+v+valor.slice(c.b)
+      if(id==='texto')setTexto(novo)
+      else if(id==='adicional')setTextoAdicional(novo)
+      else setTextosLivres(t=>({...t,[id]:novo}))
+      cursorIcone.current={id,a:c.a+v.length,b:c.a+v.length}
+    } else {
+      const novo='livre-'+crypto.randomUUID()
+      setTextosLivres(t=>({...t,[novo]:v}));setOrdem(o=>[...o,novo])
+    }
+    setModo('text');setPainel('area')
+  }
+  function inserirBitmapIcone(c,nome) {
+    const alvo=cursorIcone.current
+    const id=alvo?.id
+    const valor=id==='texto'?texto:id==='adicional'?textoAdicional:textosLivres[id]
+    const novo=imagemBase64?'imagem-'+crypto.randomUUID():'imagem'
+    let raw='';for(const byte of encodeIndustrialBmp(c))raw+=String.fromCharCode(byte)
+    const base64=btoa(raw),url=c.toDataURL()
+    if(imagemBase64)setExtras(a=>[...a,{id:novo,nome,base64,preview:url}])
+    else {mostrarBmpCatalogo(nome,base64);setPreview(url)}
+    if(alvo && typeof valor==='string' && ordem.includes(id)) {
+      const antes=valor.slice(0,alvo.a),depois=valor.slice(alvo.a)
+      // Não dividir os comandos de variáveis ao meio.
+      const dentro=valor.lastIndexOf('${',alvo.a-1)>valor.lastIndexOf('}',alvo.a-1)
+      if(dentro){setOrdem(o=>{const a=o.filter(k=>k!==novo);a.splice(a.indexOf(id)+1,0,novo);return a})}
+      else {
+        const cauda='livre-'+crypto.randomUUID()
+        if(id==='texto')setTexto(antes)
+        else if(id==='adicional')setTextoAdicional(antes)
+        else setTextosLivres(t=>({...t,[id]:antes}))
+        if(depois)setTextosLivres(t=>({...t,[cauda]:depois}))
+        setOrdem(o=>{const a=o.filter(k=>k!==novo);a.splice(a.indexOf(id)+1,0,novo,...(depois?[cauda]:[]));return a})
+      }
+    } else setOrdem(o=>[...o.filter(k=>k!==novo),novo])
+    cursorIcone.current=null;setPainel('area')
+  }
+  function inserirTextoAntes(id) {
+    const novo = 'livre-'+crypto.randomUUID()
+    flushSync(()=>{
+      setTextosLivres(a=>({...a,[novo]:''}))
+      setOrdem(a=>{const b=[...a]; const pos=id===null?b.length:b.indexOf(id); b.splice(pos<0?b.length:pos,0,novo); return b})
+      setBlocoAtivo(novo); setImagemSelecionada(false)
+    })
+    document.getElementById(novo)?.focus()
+    cursorIcone.current={id:novo,a:0,b:0}
+  }
+  const editarId = useRef(null)
+  const imagens = [...(preview ? [{id:'imagem',preview,nome:imagemNome,base64:imagemBase64}] : []), ...extras]
+
+  function arrasteDaPeca(peca) {
+    return {
+      'data-peca': peca,
+      draggable: false,
+      onPointerDown(event) {
+        if (event.currentTarget.tagName === 'TEXTAREA') return
+        if (!imagens.length || enviando || !event.isPrimary || event.button !== 0) return
+        if (peca.startsWith('imagem')) {
+          setImagemSelecionada(peca)
+          event.currentTarget.focus({preventScroll:true})
+          if (!['area','texto','variaveis'].includes(painel)) setPainel('area')
+        } else {
+          setImagemSelecionada(false)
+          setBlocoAtivo(peca)
+        }
+        inicioArraste.current = event.clientX
+        event.currentTarget.setPointerCapture(event.pointerId)
+      },
+      onPointerCancel() { inicioArraste.current = null },
+      onPointerUp(event) {
+        const inicio = inicioArraste.current
+        inicioArraste.current = null
+        if (inicio === null || Math.abs(event.clientX - inicio) < 12) return
+        const outras = [...event.currentTarget.parentElement.querySelectorAll('[data-peca]')]
+          .filter(el => el.dataset.peca !== peca)
+          .sort((a,b) => ordem.indexOf(a.dataset.peca) - ordem.indexOf(b.dataset.peca))
+        if (!outras.length) return
+        const seguinte = outras.find(el => {
+          const caixa = el.getBoundingClientRect()
+          return event.clientX < caixa.left + caixa.width / 2
+        })
+        const nova = ordem.filter(id => id !== peca)
+        const posicao = seguinte ? nova.indexOf(seguinte.dataset.peca) : nova.indexOf(outras.at(-1).dataset.peca) + 1
+        nova.splice(posicao, 0, peca)
+        setOrdem(nova)
+      }
+    }
+  }
+
+  const [formatacao, setFormatacao] = useState({})
+  const [blocoAtivo, setBlocoAtivo] = useState('texto')
+  const [imagemSelecionada, setImagemSelecionada] = useState(false)
+  // Escala exclusivamente visual, comum a todos os objetos nas duas áreas.
+  const medidasVisuais = imagens.map(i => {
+    try {
+      const raw = atob(i.base64.slice(0, 48))
+      const view = new DataView(Uint8Array.from(raw, ch => ch.charCodeAt(0)).buffer)
+      return {w: Math.abs(view.getInt32(18, true)), h: Math.abs(view.getInt32(22, true))}
+    } catch { return {w: 0, h: 0} }
+  })
+  const alturaTextoVisual = Math.max(1, ...[['texto', texto], ['adicional', textoAdicional], ...Object.entries(textosLivres)].map(([id, valor]) => {
+    const f = formatacao[id] || {}
+    return (valor || '').split('\n').length * Math.max(Number(f.fontSize) || 16, ...(f.tamanhos || [])) * 1.5
+  }))
+  const escalaVisual = Math.min(1, 108 / Math.max(alturaTextoVisual, ...medidasVisuais.map(m => m.h), 1), 240 / Math.max(1, ...medidasVisuais.map(m => m.w)))
+  const temComposicaoVisual = !!preview || Object.keys(textosLivres).length > 0
+  const selecionada = imagens.find(i=>i.id===imagemSelecionada)
+  useEffect(() => { setImagemSelecionada(false) }, [preview])
+
+  function removerSelecao() {
+    if (enviando) return
+    if (selecionada) {
+      if (selecionada.id === 'imagem') {
+        const primeira = extras[0]
+        setPreview(primeira?.preview || '')
+        setImagemBase64(primeira?.base64 || '')
+        setImagemNome(primeira?.nome || '')
+        setOrigemEfeito(null); setCodigoDaPrevia('')
+        if (primeira) { setExtras(extras.slice(1)); setOrdem(o=>o.filter(id=>id!=='imagem').map(id=>id===primeira.id?'imagem':id)) }
+        else { setOrdem(o=>o.filter(id=>id!=='imagem').concat('imagem')); setModo('text'); setTexto(t=>[t,textoAdicional].filter(Boolean).join(' ')); setTextoAdicional('') }
+      } else { setExtras(a=>a.filter(i=>i.id!==selecionada.id)); setOrdem(o=>o.filter(id=>id!==selecionada.id)) }
+      setImagemSelecionada(false)
+      return
+    }
+    if (textoLivre(blocoAtivo)) { const el=document.getElementById(blocoAtivo); const v=textosLivres[blocoAtivo]||''; const a=el?.selectionStart,b=el?.selectionEnd; setTextosLivres(t=>({...t,[blocoAtivo]:b>a?v.slice(0,a)+v.slice(b):''})); return }
+    const campo = document.querySelector(blocoAtivo === 'adicional' ? 'textarea[aria-label="Texto adicional"]' : '#conteudo')
+    const valor = blocoAtivo === 'adicional' ? textoAdicional : texto
+    const inicio = campo?.selectionStart, fim = campo?.selectionEnd
+    const novo = inicio != null && fim > inicio ? valor.slice(0,inicio)+valor.slice(fim) : ''
+    if (blocoAtivo === 'adicional') setTextoAdicional(novo)
+    else setTexto(novo)
+  }
+  useEffect(() => {
+    function tecla(e) {
+      if (!imagemSelecionada || !preview || enviando || !['Delete','Backspace'].includes(e.key)) return
+      if (e.target?.closest?.('input,textarea,select,[contenteditable="true"],.modal-overlay')) return
+      e.preventDefault()
+      removerSelecao()
+    }
+    function fora(e) {
+      if (!e.target?.closest?.('[data-peca^="imagem"], .ct-remover, .text-tools-row')) setImagemSelecionada(false)
+    }
+    document.addEventListener('keydown',tecla)
+    document.addEventListener('pointerdown',fora)
+    return () => { document.removeEventListener('keydown',tecla); document.removeEventListener('pointerdown',fora) }
+  }, [imagemSelecionada,preview,enviando,texto,textoAdicional,blocoAtivo,extras,textosLivres])
+  const [edicaoTexto, setEdicaoTexto] = useState(null)
+  const selecaoEdicao = useRef({a:0,b:0})
+  function partesTexto(valor, estilo = {}) {
+    const tamanhos = estilo.tamanhos || []
+    const partes = []
+    for (let i=0;i<valor.length;i++) {
+      const size = tamanhos[i] || Number(estilo.fontSize) || 16
+      const ultimo = partes.at(-1)
+      if (ultimo?.size === size) ultimo.valor += valor[i]
+      else partes.push({size,valor:valor[i]})
+    }
+    return partes
+  }
+  function previaTexto(valor, estilo) {
+    return partesTexto(valor, estilo).map((p,i)=><span key={i} style={{fontSize:p.size}}>{p.valor}</span>)
+  }
+  function mudarTamanhoTexto(delta) {
+    setEdicaoTexto(e=>{
+      const {a,b}=selecaoEdicao.current
+      const base=Number(e.estilo.fontSize)||16
+      const limitar=n=>Math.max(8,Math.min(72,n))
+      if(b>a && !e.valor.includes('${')) {
+        const tamanhos=Array.from({length:e.valor.length},(_,i)=>e.estilo.tamanhos?.[i]||base)
+        for(let i=a;i<Math.min(b,tamanhos.length);i++) tamanhos[i]=limitar(tamanhos[i]+delta)
+        return {...e,estilo:{...e.estilo,tamanhos}}
+      }
+      return {...e,estilo:{...e.estilo,fontSize:limitar(base+delta),tamanhos:undefined}}
+    })
+  }
+
+  function abrirEdicaoTexto(bloco) {
+    selecaoEdicao.current = {a:0,b:0}
+    const estilo = formatacao[bloco] || {}
+    setEdicaoTexto({ bloco, valor: textoLivre(bloco) ? textosLivres[bloco] || '' : bloco === 'adicional' ? textoAdicional : texto,
+      estilo: { fontFamily: 'Arial', fontSize: 16, ...estilo } })
+  }
+  function alterarEstiloTexto(chave, valor) {
+    setEdicaoTexto(edicao => ({ ...edicao, estilo: { ...edicao.estilo, [chave]: valor } }))
+  }
+  function aplicarEdicaoTexto() {
+    const { bloco, valor, estilo } = edicaoTexto
+    if (textoLivre(bloco)) setTextosLivres(t=>({...t,[bloco]:valor}))
+    else if (bloco === 'adicional') setTextoAdicional(valor)
+    else setTexto(valor)
+    setFormatacao(atual => ({ ...atual, [bloco]: estilo }))
+    setBlocoAtivo(bloco)
+    setEdicaoTexto(null)
+  }
+
   function montarTrabalho(nomeForcado = '') {
     const nome = (nomeForcado || nomeTrabalho).trim() || 'Trabalho'
     const trabalho = {
       formato: 'Lucenaart CT120 Manager',
       versao: '1.3',
       nome,
-      tipo: modo,
-      texto: modo === 'image' ? '' : texto,
+      tipo: imagemBase64 ? 'image' : modo,
+      texto: texto,
+      ...((texto.trim() || textoAdicional) && imagemBase64 ? { versao: '1.4', tipo: 'image', composicao: true, ordem, imagemPrimeiro: ordem.indexOf('imagem') < ordem.indexOf('texto'), textoAdicional } : {}),
+      formatacao,
+      extras, ordem, textosLivres, textoAdicional,
       salvoEm: new Date().toISOString()
     }
-    if (modo === 'image') {
+    if (modo === 'image' || imagemBase64) {
       if (origemEfeito) trabalho.origemEfeito = origemEfeito
       trabalho.imagemBase64 = imagemBase64
       trabalho.imagemNome = imagemNome || `${nome}.bmp`
@@ -98,8 +316,8 @@ function App() {
   function validarTrabalhoParaSalvar() {
     const nome = nomeTrabalho.trim()
     if (!nome) throw new Error('Digite o nome do trabalho.')
-    if (modo === 'image' && !imagemBase64) throw new Error('Selecione uma imagem primeiro.')
-    if (modo !== 'image' && !texto.trim()) throw new Error('Digite o conteúdo do trabalho.')
+    if (modo === 'image' && !imagemBase64 && !texto.trim()) throw new Error('Selecione uma imagem primeiro.')
+    if (!imagemBase64 && !texto.trim()) throw new Error('Digite o conteúdo do trabalho.')
     return nome
   }
 
@@ -129,11 +347,17 @@ function App() {
       throw new Error('Arquivo não é um trabalho Lucenaart CT120 Manager.')
     }
     const tipo = ['text', 'variable', 'image'].includes(trabalho.tipo) ? trabalho.tipo : 'text'
+    setTextosLivres(trabalho.textosLivres || {})
+    setFormatacao(trabalho.formatacao || {})
+    setBlocoAtivo('texto')
+    const anterior = trabalho.imagemPrimeiro ? ['imagem','texto','adicional'] : ['texto','imagem','adicional']
+    setExtras(Array.isArray(trabalho.extras)?trabalho.extras:[]); setOrdem(Array.isArray(trabalho.ordem) ? trabalho.ordem : anterior)
     setNomeTrabalho(trabalho.nome || 'Trabalho')
     setTrabalhoSelecionado(trabalho.nome || '')
     setModo(tipo)
     setOrigemEfeito(tipo === 'image' && typeof trabalho.origemEfeito?.texto === 'string' ? trabalho.origemEfeito : null)
-    setTexto(tipo === 'image' ? '' : (trabalho.texto || ''))
+    setTextoAdicional(tipo === 'image' && typeof trabalho.textoAdicional === 'string' ? trabalho.textoAdicional : '')
+    setTexto(tipo === 'image' && !trabalho.composicao ? '' : (trabalho.texto || ''))
     if (tipo === 'image') {
       const b64 = trabalho.imagemBase64 || ''
       setImagemBase64(b64)
@@ -144,7 +368,7 @@ function App() {
       setImagemNome('')
       setPreview('')
     }
-    setPainel(tipo === 'variable' ? 'variaveis' : tipo === 'text' ? 'texto' : 'imagens')
+    setPainel('area')
     setProgresso(0)
     setRetorno(`✓ Trabalho aberto: ${trabalho.nome || 'Trabalho'}`)
   }
@@ -589,19 +813,107 @@ function App() {
     }
   }
 
+  async function montarBmpComposicao(pecas) {
+    const blocos = []
+    for (const p of pecas) {
+      if (p.imagem) {
+        const img = new Image()
+        await new Promise((resolve, reject) => {
+          img.onload = resolve
+          img.onerror = () => reject(new Error('Não foi possível abrir ' + p.imagem.nome))
+          img.src = 'data:image/bmp;base64,' + p.imagem.base64
+        })
+        blocos.push({canvas: img, w: img.naturalWidth, h: img.naturalHeight})
+      } else {
+        const estilo = formatacao[p.id] || {}
+        if (estilo.tamanhos?.length) {
+          const c=document.createElement('canvas'), ctx=c.getContext('2d')
+          const fontFor=n=>`${estilo.fontStyle||'normal'} ${estilo.fontWeight||'normal'} ${n}px ${estilo.fontFamily||'Arial'}`
+          const linhas=[[]]; let pos=0
+          for(const ch of p.valor) {
+            const size=estilo.tamanhos[pos]||Number(estilo.fontSize)||16; pos+=ch.length
+            if(ch==='\r') continue
+            if(ch==='\n'){linhas.push([]);continue}
+            const linha=linhas.at(-1), ultimo=linha.at(-1)
+            if(ultimo?.size===size) ultimo.valor+=ch; else linha.push({size,valor:ch})
+          }
+          for(const linha of linhas) for(const r of linha){await document.fonts.load(fontFor(r.size),r.valor);ctx.font=fontFor(r.size);r.w=ctx.measureText(r.valor).width}
+          const alturas=linhas.map(l=>Math.max(Number(estilo.fontSize)||16,...l.map(r=>r.size)))
+          c.width=Math.ceil(Math.max(1,...linhas.map(l=>l.reduce((n,r)=>n+r.w,0))))+8
+          c.height=Math.ceil(alturas.reduce((n,h)=>n+h*1.3,0))+8
+          ctx.fillStyle='white';ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle='black';ctx.textBaseline='alphabetic'
+          let y=4
+          linhas.forEach((l,i)=>{let x=4;for(const r of l){ctx.font=fontFor(r.size);ctx.fillText(r.valor,x,y+alturas[i]);x+=r.w}y+=alturas[i]*1.3})
+          blocos.push({canvas:c,w:c.width,h:c.height});continue
+        }
+        const size = Number(estilo.fontSize) || 16
+        const font = `${estilo.fontStyle || 'normal'} ${estilo.fontWeight || 'normal'} ${size}px ${estilo.fontFamily || 'Arial'}`
+        await document.fonts.load(font, p.valor)
+        const c = document.createElement('canvas'), ctx = c.getContext('2d')
+        ctx.font = font
+        const linhas = p.valor.split(/\r?\n/)
+        const medidas = linhas.map(l => ctx.measureText(l))
+        const left = Math.ceil(Math.max(0, ...medidas.map(m => m.actualBoundingBoxLeft || 0)))
+        const right = Math.ceil(Math.max(1, ...medidas.map(m => Math.max(m.width, m.actualBoundingBoxRight || 0))))
+        const ascent = Math.ceil(Math.max(size, ...medidas.map(m => m.actualBoundingBoxAscent || 0)))
+        const descent = Math.ceil(Math.max(size * .2, ...medidas.map(m => m.actualBoundingBoxDescent || 0)))
+        const step = ascent + descent
+        c.width = left + right + 4; c.height = step * linhas.length + 4
+        ctx.fillStyle = 'white'; ctx.fillRect(0, 0, c.width, c.height)
+        ctx.font = font; ctx.fillStyle = 'black'; ctx.textBaseline = 'alphabetic'
+        linhas.forEach((l, i) => ctx.fillText(l, left + 2, ascent + 2 + i * step))
+        blocos.push({canvas:c, w:c.width, h:c.height})
+      }
+    }
+    const gap = 4
+    const w = blocos.reduce((n,b)=>n+b.w,0) + gap * (blocos.length-1)
+    const h = Math.max(...blocos.map(b=>b.h))
+    if (w > 1000 || h > 480) throw new Error(`Composição ${w} × ${h} px excede o limite de teste 1000 × 480. Reduza os objetos.`)
+    const c = document.createElement('canvas'); c.width=w; c.height=h
+    const ctx=c.getContext('2d'); ctx.fillStyle='white'; ctx.fillRect(0,0,w,h)
+    ctx.imageSmoothingEnabled=false
+    let x=0
+    for(const b of blocos){ctx.drawImage(b.canvas,x,Math.floor((h-b.h)/2));x+=b.w+gap}
+    return arrayBufferToBase64(encodeIndustrialBmp(c))
+  }
+
+  const preparandoEnvio = useRef(false)
   async function enviar() {
+    if (preparandoEnvio.current || enviando) return
+    preparandoEnvio.current = true
     try {
-      if (modo === 'image' && codigoDaPrevia && codigoDaPrevia !== codigoBmp.trim()) {
+      if (!writeRef.current) throw new Error('Conecte o CT120 primeiro')
+      if (imagemBase64 && codigoDaPrevia && codigoDaPrevia !== codigoBmp.trim()) {
         limparBmpDaPrevia()
         setResultadoCodigoBmp('Código alterado. Toque em LOCALIZAR BMP.')
         throw new Error('Localize o BMP do código atual antes de enviar.')
       }
-      const data = prepararDados()
+      const pecas = [...new Set([...ordem, 'texto', 'imagem', 'adicional', ...Object.keys(textosLivres), ...extras.map(i=>i.id)])].map(id => {
+        const imagem = id === 'imagem' ? (imagemBase64 ? {nome:imagemNome,base64:imagemBase64} : null) : extras.find(i=>i.id===id)
+        const valor = id==='texto' ? texto : id==='adicional' ? textoAdicional : textosLivres[id]
+        return {id,imagem,valor}
+      }).filter(p=>p.imagem || p.valor?.trim())
+      if (!pecas.length) throw new Error('Digite ou insira o conteúdo do trabalho.')
+      const temVariavel = pecas.some(p=>p.valor?.includes('${')) || (modo==='variable' && pecas.some(p=>p.valor))
+      const composicao = pecas.length > 1 || pecas.some(p=>!p.imagem && p.id!=='texto') || pecas.some(p=>!p.imagem && Object.keys(formatacao[p.id] || {}).length)
+      if (composicao && temVariavel) throw new Error('Composição com variáveis dinâmicas ainda não validada no CT120.')
+      let tipoEnvio, data, nome = ''
+      if (composicao) {
+        setRetorno('Preparando BMP da composição...')
+        data = await montarBmpComposicao(pecas)
+        tipoEnvio = 'image'; nome = 'composicao.bmp'
+      } else if (pecas[0].imagem) {
+        tipoEnvio='image'; data=pecas[0].imagem.base64; nome=pecas[0].imagem.nome
+      } else {
+        tipoEnvio=temVariavel?'variable':'text'; data=new TextEncoder().encode(pecas[0].valor)
+      }
       setRetorno('Enviando ao CT120...')
-      await enviarPacotes(modo, data, modo === 'image' ? imagemNome : '')
+      await enviarPacotes(tipoEnvio, data, nome)
     } catch (error) {
       setRetorno(`ERRO: ${error.message}`)
       setEnviando(false)
+    } finally {
+      preparandoEnvio.current = false
     }
   }
 
@@ -774,6 +1086,11 @@ function App() {
   }
 
   function limparBmpDaPrevia() {
+    setExtras([]); setOrdem(o=>o.filter(id=>!id.startsWith('imagem-')))
+    if (textoAdicional) {
+      setTexto(atual => [atual, textoAdicional].filter(Boolean).join(' '))
+      setTextoAdicional('')
+    }
     setOrigemEfeito(null)
     setCodigoDaPrevia('')
     setImagemNome('')
@@ -846,6 +1163,54 @@ function App() {
 
   const [abaCodigo,setAbaCodigo] = useState('vincular')
   const [codigoCopiado,setCodigoCopiado] = useState(null)
+  const imagemDaArea = useRef(null)
+
+  async function colarNaArea() {
+    if (!codigoCopiado) {
+      try {
+        setTexto(await navigator.clipboard.readText())
+      } catch {
+        setRetorno('Use a opção Colar do teclado.')
+      }
+      return
+    }
+
+    try {
+      acrescentarBitmap(codigoCopiado.canvas, codigoCopiado.nome)
+      setCodigoCopiado(null)
+    } catch (erro) {
+      setRetorno(erro.message)
+    }
+  }
+
+  function acrescentarBitmap(imagem, nome) {
+    const c=document.createElement('canvas'); c.width=imagem.naturalWidth||imagem.width; c.height=imagem.naturalHeight||imagem.height;
+    const ctx=c.getContext('2d'); ctx.fillStyle='white'; ctx.fillRect(0,0,c.width,c.height); ctx.drawImage(imagem,0,0);
+    bitmapIndustrial(c,nome)
+  }
+
+  const [bmpPendente, setBmpPendente] = useState(null)
+  const previaBmpPendente = useRef(null)
+
+  function usarBmpPendente() {
+    const imagem = previaBmpPendente.current
+    if (!imagem?.complete || !imagem.naturalWidth) {
+      setRetorno('Aguarde a prévia do BMP carregar.')
+      return
+    }
+    try {
+      if (imagemBase64) {
+        acrescentarBitmap(imagem, bmpPendente.nome)
+      } else {
+        mostrarBmpCatalogo(bmpPendente.nome, bmpPendente.base64)
+        setPainel('area')
+      }
+      setBmpPendente(null)
+    } catch (erro) {
+      setRetorno(erro.message)
+    }
+  }
+
   const arquivoVinculo = useRef(null)
 
   async function salvarArquivoVinculado(event) {
@@ -893,12 +1258,8 @@ function App() {
         const comma = dataUrl.indexOf(',')
         const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl
         validarBmpBase64(b64)
-        mostrarBmpCatalogo(file.name, b64)
-        setResultadoCodigoBmp(`BMP selecionado: ${file.name}. Digite o código e toque em VINCULAR BMP.`)
-        setRetorno(`Imagem selecionada: ${file.name}`)
+        setBmpPendente({ nome: file.name, base64: b64 })
       } catch (error) {
-        limparBmpDaPrevia()
-        setResultadoCodigoBmp('Imagem não carregada.')
         setRetorno(`ERRO: ${error?.message || String(error)}`)
       } finally {
         event.target.value = ''
@@ -912,6 +1273,13 @@ function App() {
   const conectado = status.startsWith('CT120 CONECTADO')
 
   function limparConteudo() {
+    cursorIcone.current=null
+    setTextosLivres({})
+    setExtras([]); editarId.current=null; setImagemSelecionada(false)
+    setTextoAdicional('')
+    setFormatacao({})
+    setBlocoAtivo('texto')
+    setOrdem(['texto','imagem','adicional'])
     setOrigemEfeito(null)
     setCodigoDaPrevia('')
     setTexto('')
@@ -931,7 +1299,11 @@ function App() {
   }
   function bitmapIndustrial(c,nome,painelDestino='area') {
     let raw='';for(const byte of encodeIndustrialBmp(c))raw+=String.fromCharCode(byte);
-    mostrarBmpCatalogo(nome,btoa(raw));setPreview(c.toDataURL());setPainel(painelDestino);
+    const base64=btoa(raw), url=c.toDataURL(), id=editarId.current; editarId.current=null;
+    if (id && id!=='imagem') { setExtras(a=>a.map(i=>i.id===id?{...i,nome,base64,preview:url}:i)); }
+    else if (imagemBase64 && !id) { const novo='imagem-'+crypto.randomUUID(); setExtras(a=>[...a,{id:novo,nome,base64,preview:url}]); setOrdem(o=>[...o,novo]); }
+    else { mostrarBmpCatalogo(nome,base64);setPreview(url); }
+    setPainel(painelDestino);
   }
   const effectCanvas = useRef(null)
   const [effectFits, setEffectFits] = useState(false)
@@ -1008,6 +1380,7 @@ function App() {
     if (!effectFits || !effectCanvas.current) return
     bitmapIndustrial(effectCanvas.current, 'texto-efeito.bmp')
     setOrigemEfeito({ texto, efeito, fonteEfeito, boldE, italicE, sizeE, strokeE, marginE })
+    setTexto('')
     setEfeito('')
   }
 
@@ -1032,9 +1405,47 @@ function App() {
         </div>
         <section className="work-area">
           <h2>ÁREA DE TRABALHO</h2>
-          <div className="work-preview">{modo === 'image' ? (preview ? <img src={preview} alt="Prévia" /> : 'Selecione uma imagem') : (texto || 'Novo trabalho • Digite um texto ou gere um código')}</div>
-          {modo === 'image' && preview && <button className="btn btn-full" disabled={enviando} onClick={() => {
-            if (origemEfeito) {
+          <div className="work-preview ct-composicao ct-area-fixa" style={{'--ct-escala': escalaVisual}}>
+            {texto && <span {...arrasteDaPeca('texto')} style={{ ...formatacao.texto, touchAction: preview ? 'pan-y' : undefined, order: ordem.indexOf('texto'), flex: '0 0 auto', whiteSpace: 'pre' }}>{previaTexto(texto,formatacao.texto)}</span>}
+            {imagens.map(i=><img key={i.id} {...arrasteDaPeca(i.id)} tabIndex={0} className={imagemSelecionada===i.id?'ct-imagem-selecionada':'ct-imagem-selecionavel'} onFocus={()=>setImagemSelecionada(i.id)} src={i.preview} alt={i.nome} style={{order:ordem.indexOf(i.id),touchAction:'pan-y',flexShrink:0,objectFit:'contain'}}/>)}
+            {preview && textoAdicional && <span {...arrasteDaPeca('adicional')} style={{ ...formatacao.adicional,touchAction:'pan-y',order: ordem.indexOf('adicional'), flexShrink: 0, whiteSpace: 'pre'}}>{previaTexto(textoAdicional,formatacao.adicional)}</span>}
+            {ordem.filter(textoLivre).map(id=>textosLivres[id] && <span key={id} {...arrasteDaPeca(id)} style={{...formatacao[id],order:ordem.indexOf(id),whiteSpace:'pre',flexShrink:0}}>{previaTexto(textosLivres[id],formatacao[id])}</span>)}
+            {!texto && !preview && !Object.values(textosLivres).some(Boolean) && 'Novo trabalho • Digite um texto ou gere um código'}
+          </div>
+
+        </section>
+        {['area','texto','variaveis','icones'].includes(painel) && (        <section className="content-section">
+          {painel !== 'area' && <h2>{painel.toUpperCase()}</h2>}
+          {['area','texto','variaveis'].includes(painel) && (
+            <div className="input-panel">
+              <label htmlFor="conteudo">Conteúdo</label>
+              <div className={"ct-conteudo-fixo" + (temComposicaoVisual ? " ct-conteudo-composto" : "")} style={temComposicaoVisual ? {'--ct-escala': escalaVisual, display:'flex', alignItems:'center', gap:4, overflowX:'auto',
+                background:'white', border:'1px solid #1039d8', borderRadius:6, padding:6, maxWidth:'100%'} : undefined}>
+                <textarea {...arrasteDaPeca('texto')} id="conteudo" onSelect={e=>guardarCursor('texto',e)} onClick={e=>guardarCursor('texto',e)} onFocus={()=>{setBlocoAtivo('texto');setImagemSelecionada(false)}} value={texto} onChange={e => setTexto(e.target.value)}
+                  disabled={enviando} rows={temComposicaoVisual ? Math.max(1,texto.split('\n').length) : 5} wrap="off" placeholder={temComposicaoVisual ? '' : "Digite o conteúdo para o CT120"}
+                  style={preview || Object.keys(textosLivres).length ? {...formatacao.texto, order:ordem.indexOf('texto')*2, flex:'0 0 auto', width:texto ? larguraCampo(texto, 1) : '18px',
+                    border:0, resize:'none', whiteSpace:'pre'} : {...formatacao.texto, whiteSpace:'pre', overflowX:'auto'}} />
+                {ordem.filter(textoLivre).map(id=><textarea key={id} id={id} data-peca={id} aria-label="Texto livre" onSelect={e=>guardarCursor(id,e)} onClick={e=>guardarCursor(id,e)} value={textosLivres[id]||''} onFocus={()=>{setBlocoAtivo(id);setImagemSelecionada(false)}} onChange={e=>setTextosLivres(t=>({...t,[id]:e.target.value}))} disabled={enviando} rows={Math.max(1,(textosLivres[id]||'').split('\n').length)} wrap="off" style={{...formatacao[id],order:ordem.indexOf(id)*2,flex:'0 0 auto',width:larguraCampo(textosLivres[id]||'',4),border:0,resize:'none',whiteSpace:'pre'}}/>)}
+                {preview && <>
+                  {ordem.filter(id=>imagens.some(i=>i.id===id)).map(id=>{
+                    const pos=ordem.indexOf(id)
+                    const proximo=ordem.slice(pos+1).find(k=>k==='texto'||(k==='adicional'&&textoAdicional!=='')||textoLivre(k)||imagens.some(i=>i.id===k))
+                    return <Fragment key={id+'-espacos'}>
+                      <button type="button" className="ct-inserir-texto" style={{order:pos*2-1}} disabled={enviando} onClick={()=>inserirTextoAntes(id)} aria-label="Digitar antes da imagem" />
+                      {(!proximo||!imagens.some(i=>i.id===proximo))&&<button type="button" className="ct-inserir-texto" style={{order:pos*2+1}} disabled={enviando} onClick={()=>inserirTextoAntes(proximo||null)} aria-label="Digitar depois da imagem" />}
+                    </Fragment>
+                  })}
+                  {imagens.map(i=><img key={i.id} {...arrasteDaPeca(i.id)} tabIndex={0} className={imagemSelecionada===i.id?'ct-imagem-selecionada':'ct-imagem-selecionavel'} onFocus={()=>setImagemSelecionada(i.id)} src={i.preview} alt={i.nome} style={{order:ordem.indexOf(i.id)*2,flex:'0 0 auto',width:'auto',height:'auto',objectFit:'contain',touchAction:'pan-y'}}/>)}
+                  {textoAdicional !== '' && <textarea {...arrasteDaPeca('adicional')} aria-label="Texto adicional" onSelect={e=>guardarCursor('adicional',e)} onClick={e=>guardarCursor('adicional',e)} onFocus={()=>{setBlocoAtivo('adicional');setImagemSelecionada(false)}} value={textoAdicional}
+                    onChange={e => setTextoAdicional(e.target.value)} disabled={enviando} rows={Math.max(1,textoAdicional.split('\n').length)} wrap="off"
+                    style={{...formatacao.adicional, order:ordem.indexOf('adicional')*2, flex:'0 0 auto', width:larguraCampo(textoAdicional, 1), border:0, resize:'none', whiteSpace:'pre'}} />}
+                </>}
+              </div>
+              {(painel==='texto' || painel==='area') && <div className="text-tools-row">
+                <button className="btn btn-full" disabled={enviando} onClick={()=>abrirEdicaoTexto(preview ? blocoAtivo : 'texto')}>EDITAR TEXTO</button>
+                <button className="btn btn-full" disabled={enviando} onClick={()=>setEfeito('normal')}>EFEITOS DE TEXTO</button>
+                <button className="btn btn-full" disabled={enviando || !preview} onClick={() => {
+            if (origemEfeito && (!selecionada || selecionada.id==='imagem')) {
               setTexto(origemEfeito.texto)
               setFonteEfeito(origemEfeito.fonteEfeito)
               setBoldE(origemEfeito.boldE)
@@ -1044,28 +1455,18 @@ function App() {
               setMarginE(origemEfeito.marginE)
               setEfeito(origemEfeito.efeito)
             } else {
-              setImagemParaEditar({ preview, nome: imagemNome })
+              const alvo=selecionada || imagens[0]; editarId.current=alvo.id; setImagemParaEditar({preview:alvo.preview,nome:alvo.nome})
               setPainel('imagens')
             }
-          }}>{origemEfeito ? 'EDITAR TEXTO' : 'EDITAR IMAGEM'}</button>}
-        </section>
-        {['texto','variaveis','icones'].includes(painel) && (        <section className="content-section">
-          <h2>{painel.toUpperCase()}</h2>
-          {['texto','variaveis'].includes(painel) && (
-            <div className="input-panel">
-              <label htmlFor="conteudo">Conteúdo</label>
-              <textarea id="conteudo" value={texto} onChange={e => setTexto(e.target.value)}
-                disabled={enviando} rows={5} wrap="off"
-                style={{ whiteSpace: 'pre', overflowWrap: 'normal', overflowX: 'auto' }}
-                placeholder="Digite o conteúdo para o CT120" />
-              {painel==='texto' && <button className="btn btn-full" disabled={enviando} onClick={()=>setEfeito('normal')}>EFEITOS DE TEXTO</button>}
-              <div className="edit-actions"><button className="btn" onClick={async()=>{try{await navigator.clipboard.writeText(texto)}catch{setRetorno('Não foi possível copiar.')}}}>Copiar</button><button className="btn" disabled={enviando} onClick={async()=>{try{setTexto(await navigator.clipboard.readText())}catch{setRetorno('Use a opção Colar do teclado.')}}}>Colar</button><button className="btn" disabled={enviando} onClick={()=>setTexto('')}>Remover</button><button className="btn" onClick={()=>setPainel('area')}>Voltar</button></div>
+          }}>EDITAR IMAGEM</button>
+              </div>}
+              <div className="edit-actions"><button className="btn" onClick={async()=>{try{await navigator.clipboard.writeText(texto)}catch{setRetorno('Não foi possível copiar.')}}}>Copiar</button><button className="btn" disabled={enviando} onClick={colarNaArea}>Colar</button><button className="btn ct-remover" disabled={enviando} onClick={removerSelecao}>Remover</button><button className="btn" onClick={()=>setPainel('area')}>Voltar</button></div>
             </div>
           )}
           {painel === 'variaveis' && (
             <button className="btn btn-full" disabled={enviando} ref={editorBotaoRef} onClick={() => { setEtapaVariavel({ tipo: 'menu' }); setEditorAberto(true) }}>EDITOR DE VARIÁVEIS</button>
           )}
-          {painel==='icones' && <Icones onSymbol={v=>{setTexto(t=>t+v);setModo('text');setPainel('texto')}} onBitmap={bitmapIndustrial} disabled={enviando} onBack={()=>setPainel('area')}/>}
+          {painel==='icones' && <Icones onSymbol={inserirSimbolo} onBitmap={inserirBitmapIcone} disabled={enviando} onBack={()=>setPainel('area')}/>}
         </section>)}
         <section className="work-controls">          <div className="work-actions">
            <button className="btn save" disabled={enviando} onClick={() => { if(nomeTrabalho.trim()) salvarTrabalho(); else setPainel('trabalhos') }}><Icon name="save"/>SALVAR</button>
@@ -1076,7 +1477,7 @@ function App() {
           <button className="btn stop" disabled={!enviando} onClick={pararEnvio}>Parar envio</button>
           <div className="progress-label">{enviando ? "ENVIANDO" : "AGUARDANDO ENVIO"} • {progresso}%</div><progress max="100" value={progresso} />
         </section>
-        <nav className="nav-grid">{[['texto','texto','TEXTO'],['variaveis','variaveis','VARIÁVEIS'],['codigos','codigos','CÓDIGOS'],['imagens','imagens','IMAGENS'],['icones','grid','ÍCONES'],['area','grid','ÁREA'],['trabalhos','folder','TRABALHOS'],['novo','novo','NOVO'],['mais','grid','MAIS'],['bluetooth','printer','DATADOR']].map(([id,icone,nome]) => <button key={id} className={'btn '+(painel===id?'selected':'')} disabled={enviando} onClick={()=>{if(id==='novo'){novoTrabalho();setPainel('texto');return}setPainel(id);if(id==='texto')setModo('text');if(id==='variaveis')setModo('variable')}}><Icon name={icone}/>{nome}</button>)}</nav>
+        <nav className="nav-grid">{[['texto','texto','TEXTO'],['variaveis','variaveis','VARIÁVEIS'],['codigos','codigos','CÓDIGOS'],['imagens','imagens','IMAGENS'],['icones','grid','ÍCONES'],['area','grid','ÁREA'],['trabalhos','folder','TRABALHOS'],['novo','novo','NOVO'],['mais','grid','MAIS'],['bluetooth','printer','DATADOR']].map(([id,icone,nome]) => <button key={id} className={'btn '+(painel===id?'selected':'')} disabled={enviando} onClick={()=>{if(id==='novo'){novoTrabalho();setPainel('texto');return}editarId.current=null;setPainel(id);if(id==='texto')setModo('text');if(id==='variaveis')setModo('variable')}}><Icon name={icone}/>{nome}</button>)}</nav>
         {painel==='codigos' && <section className="content-section">
           <div className="edit-actions">
             <button className="btn" onClick={()=>setAbaCodigo('gerar')}>Gerar</button>
@@ -1095,12 +1496,13 @@ function App() {
               finally {setLendoCodigo(false)}
             }}>Leitor</button>
           </div>
-          {abaCodigo==='gerar' ? <GeradorCodigos disabled={enviando} onBack={()=>setPainel('area')}
+          {abaCodigo==='gerar' ? <GeradorCodigos onUse={acrescentarBitmap} disabled={enviando} onBack={()=>setPainel('area')}
             onCopy={(canvas,nome)=>{
               const copia=document.createElement('canvas')
               copia.width=canvas.width;copia.height=canvas.height
               copia.getContext('2d').drawImage(canvas,0,0)
               setCodigoCopiado({canvas:copia,nome})
+              setPainel('area')
             }}/> : <div style={{marginTop:16}}>
             <strong>CÓDIGO DE BARRAS / QR CODE → BMP</strong>
             <input aria-label="Código para vincular" placeholder="Leia ou digite o código" value={codigoBmp} onChange={e=>alterarCodigoBmp(e.target.value)} disabled={enviando}/>
@@ -1116,17 +1518,21 @@ function App() {
             <p role="status">{resultadoCodigoBmp}</p>
           </div>}
         </section>}
-        {painel==='area' && codigoCopiado && <button className="btn btn-full" disabled={enviando}
-          onClick={()=>{bitmapIndustrial(codigoCopiado.canvas,codigoCopiado.nome);setCodigoCopiado(null)}}>COLAR CÓDIGO</button>}
-
         {painel==='imagens' && <section className="content-section">
           <input ref={bmpCatalogoRef} type="file" accept=".bmp,image/bmp,image/x-ms-bmp"
             disabled={enviando} onChange={selecionarBmpCatalogo} hidden/>
+          {bmpPendente && <div className="modal-overlay"><div className="variable-modal" role="dialog" aria-label="Prévia do BMP">
+            <h2>{bmpPendente.nome}</h2>
+            <img ref={previaBmpPendente} src={`data:image/bmp;base64,${bmpPendente.base64}`}
+              alt="Prévia do BMP selecionado" style={{maxWidth:'100%',maxHeight:'45vh',objectFit:'contain'}} />
+            <button className="btn btn-full" disabled={enviando} onClick={usarBmpPendente}>USAR NA ÁREA DE TRABALHO</button>
+            <button className="btn btn-full" onClick={()=>setBmpPendente(null)}>FECHAR</button>
+          </div></div>}
           <EditorImagem imagemParaEditar={imagemParaEditar} onEditStart={() => setImagemParaEditar(null)}
             onBitmap={bitmapIndustrial} encodeBitmap={encodeIndustrialBmp}
             onSelectBmp={()=>bmpCatalogoRef.current?.click()} preview={preview} disabled={enviando}/>
         </section>}
-        {painel==='icones' && <section><h2>ÍCONES</h2><p>Biblioteca de impressão será incorporada na próxima etapa.</p></section>}
+
         {painel==='trabalhos' && (        <section className="jobs-section">
           <h2>TRABALHOS SALVOS</h2>
           <input aria-label="Nome do trabalho" type="text" value={nomeTrabalho}
@@ -1170,7 +1576,7 @@ function App() {
             {releConectado ? '● IMPRESSÃO CONECTADA' : '● IMPRESSÃO DESCONECTADA'}
           </div>
         </section></>)}
-        {painel==='area' && <section><h2>ÁREA DE TRABALHO</h2><div className="result-box">{imagemNome || texto || 'Nenhum conteúdo'}</div></section>}
+        {painel==='area' && <section><h2>ÁREA DE TRABALHO</h2><div className="result-box">{ordem.map(id => ({texto, imagem:imagemNome, adicional:textoAdicional})[id] || extras.find(i=>i.id===id)?.nome).filter(Boolean).join(' · ') || 'Nenhum conteúdo'}</div></section>}
         {painel==='mais' && (        <section className="log-section">
           <div className="more-tools">
             <button className="btn" onClick={()=>setExtraMenu('links')}>VÍNCULOS SALVOS</button>
@@ -1209,11 +1615,39 @@ function App() {
           </>}
         </section>
       </div>}
+      {edicaoTexto && <div className="modal-overlay"><div className="variable-modal effect-modal" role="dialog" aria-modal="true" aria-label="Editar texto">
+        <h2>EDITAR TEXTO</h2>
+        <label>{edicaoTexto.bloco === 'adicional' ? 'Texto adicional' : 'Texto principal'}
+          <textarea className="ct-texto-editor-fixo" autoFocus rows={4} style={edicaoTexto.estilo} value={edicaoTexto.valor}
+            onSelect={e=>{selecaoEdicao.current={a:e.currentTarget.selectionStart,b:e.currentTarget.selectionEnd}}}
+            onChange={e=>{selecaoEdicao.current={a:0,b:0};setEdicaoTexto({...edicaoTexto, valor:e.target.value, estilo:{...edicaoTexto.estilo,tamanhos:undefined}})}}/>
+        </label>
+        <label>Fonte<select value={edicaoTexto.estilo.fontFamily} onChange={e=>alterarEstiloTexto('fontFamily', e.target.value)}>
+          {['Arial','Georgia','Courier New','Arial Black','cursive'].map(f=><option key={f}>{f}</option>)}
+          {fonts.map(f=><option key={f.name} value={f.name}>{f.label}</option>)}
+        </select></label>
+        <label className="btn btn-full ct-importar-fonte">IMPORTAR FONTE TTF / OTF<input type="file" accept=".ttf,.otf" style={{display:'none'}} onChange={e=>importFont(e,'editor')}/></label>
+        <label>Tamanho da letra · {edicaoTexto.estilo.fontSize} px
+          <input type="range" min="8" max="72" value={edicaoTexto.estilo.fontSize}
+            onChange={e=>alterarEstiloTexto('fontSize', Number(e.target.value))}/>
+        </label>
+        <div className="edit-actions">
+          <button type="button" className="btn" onPointerDown={e=>e.preventDefault()} onClick={()=>mudarTamanhoTexto(-1)}>− DIMINUIR</button>
+          <button type="button" className="btn" onPointerDown={e=>e.preventDefault()} onClick={()=>mudarTamanhoTexto(1)}>+ AUMENTAR</button>
+        </div>
+        {edicaoTexto.estilo.tamanhos && <div style={{...edicaoTexto.estilo,whiteSpace:'pre-wrap',overflowX:'auto',background:'#fff',padding:6}}>{previaTexto(edicaoTexto.valor,edicaoTexto.estilo)}</div>}
+        <label><input type="checkbox" checked={edicaoTexto.estilo.fontWeight==='bold'}
+          onChange={e=>alterarEstiloTexto('fontWeight',e.target.checked?'bold':'normal')}/> Negrito</label>
+        <label><input type="checkbox" checked={edicaoTexto.estilo.fontStyle==='italic'}
+          onChange={e=>alterarEstiloTexto('fontStyle',e.target.checked?'italic':'normal')}/> Itálico</label>
+        <div className="edit-actions"><button className="btn" onClick={aplicarEdicaoTexto}>APLICAR</button>
+          <button className="btn" onClick={()=>setEdicaoTexto(null)}>CANCELAR</button></div>
+      </div></div>}
       {efeito && <div className="modal-overlay"><div className="variable-modal effect-modal"><h2>EFEITOS DE TEXTO</h2><textarea value={texto} onChange={e=>setTexto(e.target.value)}/><select aria-label="Efeito de texto" style={{ boxSizing: 'border-box', width: '100%', height: 44, minHeight: 44, flexShrink: 0, padding: '0 8px', fontSize: 16, lineHeight: 'normal' }} value={efeito} onChange={e=>setEfeito(e.target.value)}><option value="negativo">Negativo</option><option value="vazado">Vazado</option><option value="normal">Normal — texto preto</option></select><select aria-label="Fonte do texto" style={{ boxSizing: 'border-box', width: '100%', height: 44, minHeight: 44, flexShrink: 0, padding: '0 8px', fontSize: 16, lineHeight: 'normal' }} value={fonteEfeito} onChange={e=>setFonteEfeito(e.target.value)}>{[['Arial','Sem serifa (estilo Arial)'],['Arial Black','Grossa'],['Georgia','Clássica serifada'],['Courier New','Máquina de escrever'],['Arial Narrow','Condensada'],['cursive','Manuscrita'],['sans-serif','Casual'],...fonts.map(f=>[f.name,f.label])].map(([v,n])=><option key={v} value={v}>{n}</option>)}</select><label className="btn btn-full">IMPORTAR FONTE TTF / OTF<input type="file" accept=".ttf,.otf" style={{display:'none'}} onChange={importFont}/></label><label><input type="checkbox" checked={boldE} onChange={e=>setBoldE(e.target.checked)}/> Negrito</label><label><input type="checkbox" checked={italicE} onChange={e=>setItalicE(e.target.checked)}/> Itálico</label>{[['Tamanho da letra',sizeE,setSizeE,8,160],['Espessura do contorno',strokeE,setStrokeE,1,10],['Margem',marginE,setMarginE,0,24]].map(([n,v,f,min,max])=><label key={n}>{n}: {v} px<input type="range" min={min} max={max} value={v} onChange={e=>f(+e.target.value)}/></label>)}<div style={{display:'flex',justifyContent:'center',background:'#eee',padding:6}}>
         <canvas ref={effectCanvas} aria-label="Prévia do efeito de texto" hidden={!effectFits}
           style={{maxWidth:'100%',maxHeight:'32dvh',objectFit:'contain',imageRendering:'pixelated'}}/>
         {!effectFits && <span>{texto.trim() ? 'O texto excede o limite da imagem.' : 'Digite um texto para ver a prévia.'}</span>}
-      </div><div className="edit-actions"><button className="btn" disabled={!effectFits || enviando} onClick={aplicarEfeito}>APLICAR</button><button className="btn" onClick={()=>setEfeito('')}>VOLTAR</button></div></div></div>}
+      </div><div className="edit-actions"><button className="btn" disabled={!effectFits || enviando} onClick={aplicarEfeito}>APLICAR</button><button className="btn" onClick={()=>{if(origemEfeito && imagemBase64)setTexto('');setEfeito('')}}>VOLTAR</button></div></div></div>}
       {editorAberto && (
         <div className="modal-overlay">
           <div className="variable-modal" ref={dialogoRef} key={etapaVariavel.tipo}

@@ -59,7 +59,7 @@ function renderizarCodigo(canvas,format,value,linear) {
  throw Error('Código excede 480 × 240 px.')
 }
 
-export default function GeradorCodigos({onCopy,onBack,disabled}) {
+export default function GeradorCodigos({onCopy,onUse,onBack,disabled}) {
  const ref=useRef(null)
  const [value,setValue]=useState(''),[format,setFormat]=useState('qrcode')
  const [ready,setReady]=useState(false),[status,setStatus]=useState('')
@@ -69,8 +69,15 @@ export default function GeradorCodigos({onCopy,onBack,disabled}) {
    if(!value.trim()) throw Error('Digite o conteúdo do código.')
    const linear=!['qrcode','datamatrix','pdf417'].includes(format)
    renderizarCodigo(ref.current,format,value,linear)
-   setReady(true);setStatus('Toque na prévia ou em Copiar. Depois toque em Voltar e Colar.')
+   setReady(true);setStatus('Confira a prévia. Você pode usar o código na área de trabalho ou copiá-lo.')
   } catch(error){setStatus(error.message)}
+ }
+ function usarNaArea(){
+  try {
+   onUse(ref.current, format + '.bmp')
+  } catch (erro) {
+   setStatus(erro.message)
+  }
  }
  function copy(){
   if(ready){onCopy(ref.current,format+'.bmp');setStatus('Código copiado. Toque em Voltar e depois em Colar.')}
@@ -90,6 +97,7 @@ export default function GeradorCodigos({onCopy,onBack,disabled}) {
   <button type="button" aria-label="Copiar código gerado" hidden={!ready} disabled={disabled} onClick={copy} style={{background:'white',border:0,margin:'8px auto',width:'100%'}}>
    <canvas ref={ref} style={{display:'block',maxWidth:'100%',width:['qrcode','datamatrix','pdf417'].includes(format)?'auto':'min(100%, 480px)',minWidth:80,height:'auto',margin:'auto',imageRendering:'pixelated'}}/>
   </button>
+  {ready && <button type="button" className="btn btn-full" disabled={disabled} onClick={usarNaArea}>USAR NA ÁREA DE TRABALHO</button>}
   <button className="btn btn-full" disabled={disabled} onClick={()=>update('')}>LIMPAR CÓDIGO</button>
   <p role="status">{status||'Digite o conteúdo e escolha o formato.'}</p>
  </div>
