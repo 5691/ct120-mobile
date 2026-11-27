@@ -94,3 +94,7 @@ label{display:block;font-size:16px;margin-bottom:6px}input[type=text],input:not(
 .workspace > .result-box[role="status"]:empty{display:none;}
 .workspace > .result-box[role="status"]{min-height:0;}
 .app-shell > .ct-credit{padding-top:18px;padding-bottom:10px;}
+
+/* Arraste horizontal dos objetos, sem alterar dimensões de impressão. */
+.ct-area-fixa > [data-peca], .ct-conteudo-composto > img[data-peca]{touch-action:pan-y!important;cursor:grab;user-select:none;-webkit-user-select:none;-webkit-user-drag:none;position:relative;}
+.ct-arrastando{z-index:5;cursor:grabbing!important;opacity:.8;outline:2px dashed #1039d8!important;}

@@ -148,41 +148,41 @@ function App() {
   const imagens = [...(preview ? [{id:'imagem',preview,nome:imagemNome,base64:imagemBase64}] : []), ...extras]
 
   function arrasteDaPeca(peca) {
+    function finalizar(event, cancelar=false) {
+      const d=inicioArraste.current
+      if(!d || d.pointer!==event.pointerId || d.el!==event.currentTarget)return
+      inicioArraste.current=null
+      d.el.style.translate=''; d.el.classList.remove('ct-arrastando')
+      if(cancelar || !d.movendo)return
+      const x=event.clientX-d.offset+d.largura/2
+      const outras=[...d.el.parentElement.querySelectorAll('[data-peca]')].filter(el=>el!==d.el && el.getBoundingClientRect().width>0 && (el.tagName!=='TEXTAREA'||el.value))
+        .sort((a,b)=>a.getBoundingClientRect().left-b.getBoundingClientRect().left)
+      if(!outras.length)return
+      const seguinte=outras.find(el=>{const r=el.getBoundingClientRect();return x<r.left+r.width/2})
+      setOrdem(atual=>{const nova=atual.filter(id=>id!==peca);const pos=seguinte?nova.indexOf(seguinte.dataset.peca):nova.indexOf(outras.at(-1).dataset.peca)+1;nova.splice(Math.max(0,pos),0,peca);return nova})
+    }
     return {
-      'data-peca': peca,
-      draggable: false,
-      onPointerDown(event) {
-        if (event.currentTarget.tagName === 'TEXTAREA') return
-        if (!imagens.length || enviando || !event.isPrimary || event.button !== 0) return
-        if (peca.startsWith('imagem')) {
-          setImagemSelecionada(peca)
-          event.currentTarget.focus({preventScroll:true})
-          if (!['area','texto','variaveis'].includes(painel)) setPainel('area')
-        } else {
-          setImagemSelecionada(false)
-          setBlocoAtivo(peca)
-        }
-        inicioArraste.current = event.clientX
-        event.currentTarget.setPointerCapture(event.pointerId)
+      'data-peca':peca, draggable:false,
+      onPointerDown(event){
+        if(event.currentTarget.tagName==='TEXTAREA'||enviando||!event.isPrimary||event.button!==0)return
+        const el=event.currentTarget,r=el.getBoundingClientRect()
+        if(peca.startsWith('imagem')){setImagemSelecionada(peca);el.focus({preventScroll:true});if(!['area','texto','variaveis'].includes(painel))setPainel('area')}
+        else {setImagemSelecionada(false);setBlocoAtivo(peca)}
+        inicioArraste.current={el,pointer:event.pointerId,x:event.clientX,y:event.clientY,offset:event.clientX-r.left,largura:r.width,movendo:false}
+        el.setPointerCapture(event.pointerId)
       },
-      onPointerCancel() { inicioArraste.current = null },
-      onPointerUp(event) {
-        const inicio = inicioArraste.current
-        inicioArraste.current = null
-        if (inicio === null || Math.abs(event.clientX - inicio) < 12) return
-        const outras = [...event.currentTarget.parentElement.querySelectorAll('[data-peca]')]
-          .filter(el => el.dataset.peca !== peca)
-          .sort((a,b) => ordem.indexOf(a.dataset.peca) - ordem.indexOf(b.dataset.peca))
-        if (!outras.length) return
-        const seguinte = outras.find(el => {
-          const caixa = el.getBoundingClientRect()
-          return event.clientX < caixa.left + caixa.width / 2
-        })
-        const nova = ordem.filter(id => id !== peca)
-        const posicao = seguinte ? nova.indexOf(seguinte.dataset.peca) : nova.indexOf(outras.at(-1).dataset.peca) + 1
-        nova.splice(posicao, 0, peca)
-        setOrdem(nova)
-      }
+      onPointerMove(event){
+        const d=inicioArraste.current
+        if(!d||d.pointer!==event.pointerId||d.el!==event.currentTarget)return
+        const dx=event.clientX-d.x
+        if(!d.movendo&&Math.abs(dx)<6)return
+        d.movendo=true;d.el.classList.add('ct-arrastando')
+        const escala=Number(getComputedStyle(d.el).zoom)||1
+        d.el.style.translate=`${dx/escala}px 0`
+      },
+      onPointerUp:event=>finalizar(event),
+      onPointerCancel:event=>finalizar(event,true),
+      onLostPointerCapture:event=>finalizar(event,true)
     }
   }
 
@@ -442,13 +442,18 @@ function App() {
         `${nomeSeguro}.ct120.json`,
         { type: 'application/json' }
       )
-      if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
-        await navigator.share({ title: 'Trabalho CT120', files: [file] })
-        setRetorno(`Compartilhando trabalho: ${trabalho.nome}`)
-      } else {
-        baixarTrabalho(trabalho)
-        setRetorno(`Arquivo preparado: ${trabalho.nome}.ct120.json`)
+      try {
+        if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+          await navigator.share({ title: 'Trabalho CT120', files: [file] })
+          setRetorno(`Compartilhando trabalho: ${trabalho.nome}`)
+          return
+        }
+      } catch (error) {
+        if (error?.name === 'AbortError') return
+        // Se o sistema bloquear o compartilhamento, exportar o JSON.
       }
+      baixarTrabalho(trabalho)
+      setRetorno(`Arquivo preparado: ${nomeSeguro}.ct120.json`)
     } catch (error) {
       if (error?.name !== 'AbortError') setRetorno(`ERRO ao compartilhar: ${error.message}`)
     }
